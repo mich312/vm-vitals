@@ -1,0 +1,9 @@
+<svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="vitals">
+  <title>vitals</title>
+  <!-- A calm heartbeat trace. The central down–up stroke reads as a V:
+       flat baseline, one gentle dip (the V), one clean beat, flat again.
+       `currentColor` so it adapts to light/dark; set color where embedded. -->
+  <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 50 H34 L44 68 L54 26 L64 50 H86"/>
+  </g>
+</svg>

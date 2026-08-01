@@ -1,0 +1,60 @@
+# vitals — example configuration. Copy to /etc/vitals/config.toml and edit.
+# Nothing here is required to be secret; secrets come from the environment
+# (see `bot_token_env` etc.) or a systemd EnvironmentFile, never this file.
+
+# How often to collect + evaluate.
+interval = "15s"
+
+[web]
+# Bind to loopback; front it with your TLS proxy (passkeys need HTTPS).
+bind = "127.0.0.1:9110"
+# When true, vitals skips its own auth and trusts an upstream proxy to have
+# authenticated the request. Leave false to use the built-in passkey login.
+trust_proxy_auth = false
+
+[alert]
+channel = "ntfy"                 # "ntfy" | "telegram"
+debounce = 3                     # ticks a breach must hold before firing (~45s)
+reminder = "6h"                  # re-notify interval while still firing
+# Dead-man's-switch: vitals pings this every tick; if vitals dies, IT alarms.
+heartbeat_url = "https://hc-ping.com/your-uuid"
+
+# ntfy: the script POSTs alerts to this topic.
+ntfy = { url = "https://ntfy.sh/your-private-topic", priority = "high" }
+
+# telegram: token comes from the environment, not this file.
+# telegram = { bot_token_env = "VITALS_TG_TOKEN", chat_id = "123456789" }
+
+[thresholds]
+disk_warn = 80
+disk_crit = 90
+mem_avail_warn_mb = 400
+mem_avail_crit_mb = 200
+load1_warn_per_core = 1.5
+load1_crit_per_core = 3.0
+container_cpu_warn = 85          # sustained, 10-min avg
+cert_days_warn = 14
+cert_days_crit = 3
+
+[docker]
+socket = "/var/run/docker.sock"
+# Watch everything, or narrow to specific compose projects:
+# projects = ["my-stack"]
+
+[retention]
+raw = "48h"                      # 15s samples
+five_min = "30d"
+hour = "180d"
+
+# One block per endpoint to check. `expect` is the status code that means
+# healthy — a mismatch (e.g. a 502, or a 200 where you expected a 302 redirect)
+# fires an alert.
+[[endpoint]]
+name = "example"
+url = "https://app.example.com/"
+expect = 200
+
+# [[endpoint]]
+# name = "api"
+# url = "https://api.example.com/health"
+# expect = 200

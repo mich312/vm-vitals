@@ -1,0 +1,15 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock            # a binary crate may keep this; drop the ignore if you commit it
+
+# Local runtime state / secrets
+/config.toml
+*.env
+/data
+*.db
+*.db-wal
+*.db-shm
+
+# OS / editor
+.DS_Store
