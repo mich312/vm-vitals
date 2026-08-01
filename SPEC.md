@@ -176,28 +176,34 @@ alarms — because a monitor that can fail silently is worse than none.
 
 ---
 
-## 5. Web dashboard (axum, loopback :9110)
+## 5. Surface: API-first, then MCP, dashboard optional
 
-Bound to `127.0.0.1`, fronted by the `edge` proxy at **`status.mich312.com`**.
-**Auth is app-level and passkey-first** (WebAuthn via `webauthn-rs` — same
-stack as quorum/worktime): first run bootstraps an admin who enrolls a
-passkey; login issues a signed session cookie; credentials live in the SQLite
-DB. No password to phish or leak, and the proxy already provides the required
-HTTPS/secure-context. For OSS flexibility also support a **`trust_proxy_auth`**
-mode (skip built-in auth when the operator fronts it with their own proxy
-auth) and a one-time bootstrap recovery token printed to the log on first run.
-Assets embedded in the binary (`rust-embed`) — no external CDN.
+The primary surface is a **REST/JSON API** (axum, loopback `:9110`, fronted by
+the `edge` proxy at **`status.mich312.com`**). An **MCP server** is a thin
+adapter over the same data so an agent (Claude) can ask about the box. A human
+**dashboard is a nice-to-have** that just renders the REST API. All three read
+one shared snapshot + the history store.
 
-- `GET /` — overview: host gauges (cpu/mem/disk/load), a container table
-  (state · health · cpu · mem · restarts), endpoint + cert status, and the
-  list of active alerts. Auto-refreshes.
-- `GET /graphs` — time-series charts via **uPlot** (~40 KB, embedded): host
-  cpu/mem/disk over selectable ranges (1 h / 24 h / 7 d / 30 d), plus a
-  per-container picker. min/max band + avg line.
-- `GET /api/status` — current snapshot as JSON (also what `/` renders from).
-- `GET /api/series?metric=…&labels=…&from=…&to=…` — points for a chart;
-  server picks the resolution.
-- `GET /logs/:container` — (optional, §7) SSE stream of `docker logs -f`.
+**Auth — bearer token** (config `web.token` or `$VITALS_TOKEN`) on `/api/*`
+and the MCP endpoint; `/healthz` open. Simple, standard, and exactly what MCP
+clients expect (like the lounge-mcp token). For the optional dashboard, layer
+**passkeys** (WebAuthn via `webauthn-rs`) for a browser session later; a
+`trust_proxy_auth` mode skips built-in auth when an upstream proxy authenticates.
+
+**REST API**
+- `GET /api/status` — current snapshot (host + containers) as JSON. _(M0, live.)_
+- `GET /api/containers`, `GET /api/alerts` — detail views.
+- `GET /api/series?metric=…&labels=…&from=…&to=…` — chart points; server picks
+  the resolution.
+- `GET /api/logs/:container` — SSE stream of `docker logs -f` (§7).
+
+**MCP** (streamable-HTTP, e.g. `/mcp`) — tools over the same data:
+`host_metrics`, `list_containers`, `container_logs`, `active_alerts`,
+`query_history`. Read-only; token-authed.
+
+**Dashboard (optional)** — `GET /` overview (host gauges · container table ·
+endpoint/cert status · active alerts) and `/graphs` (uPlot, embedded via
+`rust-embed`, no CDN). Built once the API + MCP are solid.
 
 ---
 
