@@ -57,7 +57,7 @@ wedges, vitals is still up and can tell you.
 **Binary (recommended — host-native, survives Docker outages):**
 
 ```sh
-curl -fsSL https://github.com/mich312/vitals/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/mich312/vm-vitals/releases/latest/download/install.sh | sh
 sudo cp config.example.toml /etc/vitals/config.toml   # then edit it
 sudo systemctl enable --now vitals
 ```
