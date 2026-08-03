@@ -1,6 +1,6 @@
-//! Config loading. M0 only needs the tick interval and the web bind address;
-//! extra sections in the file (alerts, thresholds, endpoints…) are ignored for
-//! now — serde skips unknown fields, so the full config.example.toml parses.
+//! Config loading. M0 needs the tick interval + web settings. Passkey auth for
+//! the dashboard needs the relying-party identity (rp_id/rp_origin) and a data
+//! dir to persist enrolled credentials. Extra sections in the file are ignored.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -19,10 +19,19 @@ struct Raw {
 struct WebRaw {
     #[serde(default = "default_bind")]
     bind: String,
-    /// Bearer token required on /api/*. Also read from $VITALS_TOKEN (env wins).
-    /// If neither is set, the API is unauthenticated (fine on loopback only).
+    /// Bearer token required on /api/* (or $VITALS_TOKEN). None = open (loopback).
     #[serde(default)]
     token: Option<String>,
+    /// WebAuthn relying-party id — the dashboard's hostname, e.g.
+    /// "status.mich312.com". Passkeys are bound to it. None = dashboard auth off.
+    #[serde(default)]
+    rp_id: Option<String>,
+    /// The dashboard's HTTPS origin, e.g. "https://status.mich312.com".
+    #[serde(default)]
+    rp_origin: Option<String>,
+    /// Where enrolled passkeys + sessions persist.
+    #[serde(default = "default_data_dir")]
+    data_dir: String,
 }
 
 impl Default for WebRaw {
@@ -30,6 +39,9 @@ impl Default for WebRaw {
         WebRaw {
             bind: default_bind(),
             token: None,
+            rp_id: None,
+            rp_origin: None,
+            data_dir: default_data_dir(),
         }
     }
 }
@@ -40,13 +52,18 @@ fn default_interval() -> Duration {
 fn default_bind() -> String {
     "127.0.0.1:9110".to_string()
 }
+fn default_data_dir() -> String {
+    "/var/lib/vitals".to_string()
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub interval: Duration,
     pub web_bind: SocketAddr,
-    /// Bearer token for the API; None = unauthenticated (loopback dev).
     pub web_token: Option<String>,
+    pub rp_id: Option<String>,
+    pub rp_origin: Option<String>,
+    pub data_dir: String,
 }
 
 /// Load config from `--config <path>` (or `-c`), falling back to
@@ -68,12 +85,14 @@ pub fn load() -> anyhow::Result<Config> {
         toml::from_str("")?
     };
 
-    // $VITALS_TOKEN overrides the config file (keeps the token out of the TOML).
     let web_token = std::env::var("VITALS_TOKEN").ok().filter(|s| !s.is_empty()).or(raw.web.token);
 
     Ok(Config {
         interval: raw.interval,
         web_bind: raw.web.bind.parse()?,
         web_token,
+        rp_id: raw.web.rp_id,
+        rp_origin: raw.web.rp_origin,
+        data_dir: raw.web.data_dir,
     })
 }

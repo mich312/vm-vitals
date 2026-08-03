@@ -4,6 +4,7 @@
 //! snapshot, and serve it as JSON on loopback (`/api/status`). No alerting,
 //! storage, or auth yet — that's M1+ (see SPEC.md).
 
+mod auth;
 mod collect;
 mod config;
 mod web;
@@ -51,16 +52,36 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Dashboard passkey auth, if the relying-party identity is configured.
+    let auth = match (&cfg.rp_id, &cfg.rp_origin) {
+        (Some(id), Some(origin)) => match auth::AuthState::new(id, origin, &cfg.data_dir) {
+            Ok(a) => {
+                tracing::info!("passkey dashboard auth enabled (rp_id={id})");
+                Some(a)
+            }
+            Err(e) => {
+                tracing::error!("passkey auth init failed ({e}); dashboard will be open");
+                None
+            }
+        },
+        _ => {
+            tracing::warn!("rp_id/rp_origin not set — dashboard is unauthenticated");
+            None
+        }
+    };
+
     // Web server.
     let state = web::AppState {
         snapshot,
         token: cfg.web_token.clone(),
+        auth,
     };
     let listener = tokio::net::TcpListener::bind(cfg.web_bind).await?;
     tracing::info!(
-        "vitals listening on http://{} (api auth: {})",
+        "vitals listening on http://{} (api token: {}, dashboard: {})",
         cfg.web_bind,
-        if cfg.web_token.is_some() { "token" } else { "off" }
+        if cfg.web_token.is_some() { "on" } else { "off" },
+        if state.auth.is_some() { "passkey" } else { "open" }
     );
     axum::serve(listener, web::router(state)).await?;
     Ok(())

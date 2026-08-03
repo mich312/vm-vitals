@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitals</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:#0d0f12; color:#e7e9ee; }
+  @media (prefers-color-scheme: light){ body{ background:#f6f7f9; color:#1a1c20; } }
+  header { display:flex; align-items:baseline; gap:1rem; padding:1rem 1.25rem; border-bottom:1px solid #23262c; }
+  h1 { font-size:1.15rem; margin:0; letter-spacing:.02em; }
+  header a { margin-left:auto; color:#9aa1ad; font-size:.85em; text-decoration:none; }
+  main { padding:1.25rem; max-width:900px; }
+  .gauges { display:flex; flex-wrap:wrap; gap:.75rem; margin-bottom:1.25rem; }
+  .g { background:#161a20; border:1px solid #23262c; border-radius:.6rem; padding:.7rem 1rem; min-width:8rem; }
+  @media (prefers-color-scheme: light){ .g{ background:#fff; border-color:#e5e7eb; } }
+  .g b { display:block; font-size:1.5rem; font-weight:600; }
+  .g span { color:#9aa1ad; font-size:.8em; }
+  table { border-collapse:collapse; width:100%; font-size:.9em; }
+  th, td { text-align:left; padding:.4rem .6rem; border-bottom:1px solid #23262c; }
+  th { color:#9aa1ad; font-weight:500; }
+  .dot { display:inline-block; width:.55em; height:.55em; border-radius:50%; margin-right:.4em; }
+  .up { background:#54d17a; } .down { background:#ff6b5e; } .warn { background:#ffcf5c; }
+  #ts { color:#9aa1ad; font-size:.8em; }
+</style>
+</head>
+<body>
+<header><h1>vitals</h1><span id="ts"></span><a href="/logout">sign out</a></header>
+<main>
+  <div class="gauges" id="gauges"></div>
+  <table><thead><tr><th>container</th><th>state</th><th>health</th><th>restarts</th></tr></thead>
+  <tbody id="rows"></tbody></table>
+</main>
+<script>
+function gauge(label, value, sub) { return `<div class="g"><b>${value}</b><span>${label}${sub?` · ${sub}`:''}</span></div>`; }
+
+async function tick() {
+  let r;
+  try { r = await fetch('/api/status'); } catch { return; }
+  if (r.status === 401) { location.href = '/'; return; }
+  const d = await r.json();
+  if (!d) { document.getElementById('ts').textContent = 'collecting…'; return; }
+  const h = d.host;
+  document.getElementById('gauges').innerHTML =
+      gauge('cpu', h.cpu_pct.toFixed(1) + '%')
+    + gauge('memory', h.mem_used_pct.toFixed(1) + '%', h.mem_avail_mb + ' MB free')
+    + gauge('disk', h.disk_used_pct.toFixed(1) + '%', h.disk_avail_gb.toFixed(0) + ' GB free')
+    + gauge('load', h.load1.toFixed(2), (h.uptime_secs/86400).toFixed(0) + 'd up');
+  document.getElementById('rows').innerHTML = d.containers
+    .sort((a,b)=>a.name.localeCompare(b.name))
+    .map(c => {
+      const cls = c.state === 'running' ? (c.health === 'unhealthy' ? 'warn' : 'up') : 'down';
+      return `<tr><td>${c.name}</td><td><span class="dot ${cls}"></span>${c.state}</td>`
+           + `<td>${c.health || ''}</td><td>${c.restarts}</td></tr>`;
+    }).join('');
+  document.getElementById('ts').textContent = new Date(d.ts * 1000).toLocaleTimeString();
+}
+tick(); setInterval(tick, 5000);
+</script>
+</body>
+</html>

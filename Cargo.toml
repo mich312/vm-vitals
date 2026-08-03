@@ -29,6 +29,11 @@ bollard = "0.17"               # Docker API over the socket
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
+# Passkey (WebAuthn) sign-in for the dashboard.
+webauthn-rs = "0.5"
+uuid = { version = "1", features = ["v4", "serde"] }
+axum-extra = { version = "0.9", features = ["cookie"] }
+rand = "0.8"
 
 [profile.release]
 opt-level = "z"
