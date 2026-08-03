@@ -5,58 +5,338 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vitals</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:#0d0f12; color:#e7e9ee; }
-  @media (prefers-color-scheme: light){ body{ background:#f6f7f9; color:#1a1c20; } }
-  header { display:flex; align-items:baseline; gap:1rem; padding:1rem 1.25rem; border-bottom:1px solid #23262c; }
-  h1 { font-size:1.15rem; margin:0; letter-spacing:.02em; }
-  header a { margin-left:auto; color:#9aa1ad; font-size:.85em; text-decoration:none; }
-  main { padding:1.25rem; max-width:900px; }
-  .gauges { display:flex; flex-wrap:wrap; gap:.75rem; margin-bottom:1.25rem; }
-  .g { background:#161a20; border:1px solid #23262c; border-radius:.6rem; padding:.7rem 1rem; min-width:8rem; }
-  @media (prefers-color-scheme: light){ .g{ background:#fff; border-color:#e5e7eb; } }
-  .g b { display:block; font-size:1.5rem; font-weight:600; }
-  .g span { color:#9aa1ad; font-size:.8em; }
-  table { border-collapse:collapse; width:100%; font-size:.9em; }
-  th, td { text-align:left; padding:.4rem .6rem; border-bottom:1px solid #23262c; }
-  th { color:#9aa1ad; font-weight:500; }
-  .dot { display:inline-block; width:.55em; height:.55em; border-radius:50%; margin-right:.4em; }
-  .up { background:#54d17a; } .down { background:#ff6b5e; } .warn { background:#ffcf5c; }
-  #ts { color:#9aa1ad; font-size:.8em; }
+/* ============================== tokens ============================== */
+:root{
+  color-scheme: dark light;
+  --bg-inset:#08090b; --bg-base:#0c0e11; --bg-subtle:#111418;
+  --bg-surface:#16191d; --bg-elevated:#1d2127;
+  --border-subtle:#1e2228; --border-default:#282d34; --border-strong:#363c44;
+  --text-primary:#e7eaed; --text-secondary:#9aa3ad; --text-muted:#6b747d; --text-faint:#4a525a;
+  --accent:#5b93f5; --accent-bg:rgba(91,147,245,.14); --focus-ring:rgba(91,147,245,.55);
+  --ok:#35b979; --ok-text:#5fd39b; --ok-bg:rgba(53,185,121,.14);
+  --warn:#d99e2b; --warn-text:#e8b84b; --warn-bg:rgba(217,158,43,.14);
+  --danger:#e0575f; --danger-text:#f2868c; --danger-bg:rgba(224,87,95,.14);
+  --idle:#6b747d; --idle-bg:rgba(107,116,125,.12);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.40);
+  --rim:inset 0 1px 0 rgba(255,255,255,.04);
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --r-sm:6px; --r-md:8px; --r-lg:12px; --r-full:9999px;
+  --ease:cubic-bezier(.4,0,.2,1); --dur-fast:120ms; --dur:180ms;
+}
+:root[data-theme="light"], :root:not([data-theme="dark"]){}
+@media (prefers-color-scheme: light){ :root:not([data-theme="dark"]){
+  --bg-inset:#eceef1; --bg-base:#f6f7f9; --bg-subtle:#eef0f3;
+  --bg-surface:#fff; --bg-elevated:#fff;
+  --border-subtle:#edeff2; --border-default:#e0e3e8; --border-strong:#cbd0d8;
+  --text-primary:#1a1d21; --text-secondary:#565d66; --text-muted:#79818b; --text-faint:#a8afb8;
+  --accent:#2f6fe0; --accent-bg:rgba(47,111,224,.10);
+  --ok:#1f9d5f; --ok-text:#17794a; --warn:#b7791f; --warn-text:#8a5a12;
+  --danger:#d13b43; --danger-text:#b02a32; --idle:#79818b;
+  --shadow-sm:0 1px 2px rgba(16,24,40,.06); --rim:none;
+}}
+:root[data-theme="light"]{
+  --bg-inset:#eceef1; --bg-base:#f6f7f9; --bg-subtle:#eef0f3;
+  --bg-surface:#fff; --bg-elevated:#fff;
+  --border-subtle:#edeff2; --border-default:#e0e3e8; --border-strong:#cbd0d8;
+  --text-primary:#1a1d21; --text-secondary:#565d66; --text-muted:#79818b; --text-faint:#a8afb8;
+  --accent:#2f6fe0; --accent-bg:rgba(47,111,224,.10);
+  --ok:#1f9d5f; --ok-text:#17794a; --warn:#b7791f; --warn-text:#8a5a12;
+  --danger:#d13b43; --danger-text:#b02a32; --idle:#79818b;
+  --shadow-sm:0 1px 2px rgba(16,24,40,.06); --rim:none;
+}
+/* ============================== base ============================== */
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-base);color:var(--text-primary);
+  font:14px/1.5 var(--font-ui);-webkit-font-smoothing:antialiased;
+  font-variant-numeric:tabular-nums;}
+.num,.metric,.mono{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--font-mono)}
+a{color:inherit}
+.stale main{opacity:.55;transition:opacity var(--dur) var(--ease)}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
+/* ============================== top bar ============================== */
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;
+  padding:0 20px;height:52px;background:color-mix(in srgb,var(--bg-base) 82%,transparent);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--border-subtle)}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.01em}
+.brand svg{color:var(--accent)}
+.host{color:var(--text-secondary);font-weight:500}
+.host b{color:var(--text-primary);font-weight:600}
+.verdict{display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:var(--r-full);
+  font-size:12.5px;font-weight:500;border:1px solid transparent;cursor:default;
+  transition:background var(--dur),color var(--dur),border-color var(--dur)}
+.verdict .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.verdict.ok{color:var(--ok-text);background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
+.verdict.warn{color:var(--warn-text);background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+.verdict.crit{color:var(--danger-text);background:var(--danger-bg);border-color:color-mix(in srgb,var(--danger) 34%,transparent)}
+.verdict.crit .dot{animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.spacer{margin-left:auto}
+.updated{color:var(--text-muted);font-size:12px;font-family:var(--font-mono)}
+.updated .live{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:5px;vertical-align:middle}
+.stale .updated .live{background:var(--warn)}
+.iconbtn{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:var(--r-sm);
+  border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);
+  cursor:pointer;transition:color var(--dur-fast),border-color var(--dur-fast)}
+.iconbtn:hover{color:var(--text-primary);border-color:var(--border-strong)}
+
+/* ============================== layout ============================== */
+main{max-width:1240px;margin:0 auto;padding:22px 20px 64px}
+.hero{font-size:16px;color:var(--text-secondary);margin:6px 2px 22px}
+.hero b{color:var(--text-primary);font-weight:600}
+.hero .em-warn{color:var(--warn-text);font-weight:600}
+.hero .em-crit{color:var(--danger-text);font-weight:600}
+.eyebrow{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);
+  font-weight:600;margin:26px 2px 12px}
+
+/* ============================== KPI cards ============================== */
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+@media(max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:620px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{position:relative;background:var(--bg-surface);border:1px solid var(--border-default);
+  border-radius:var(--r-lg);padding:14px 15px 12px;box-shadow:var(--shadow-sm),var(--rim);overflow:hidden}
+.kpi .lbl{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);font-weight:600}
+.kpi .val{font-size:28px;font-weight:600;letter-spacing:-.02em;margin-top:4px;line-height:1.1}
+.kpi .val small{font-size:15px;color:var(--text-secondary);font-weight:500;letter-spacing:0}
+.kpi .sub{font-size:12px;color:var(--text-muted);font-family:var(--font-mono);margin-top:2px}
+.kpi .meter{height:3px;border-radius:2px;background:var(--border-subtle);margin-top:11px;overflow:hidden}
+.kpi .meter i{display:block;height:100%;width:0;background:var(--ok);transition:width var(--dur) var(--ease),background var(--dur)}
+.kpi.warn .meter i,.kpi.warn .spark-c{--c:var(--warn)}
+.kpi.crit .meter i,.kpi.crit .spark-c{--c:var(--danger)}
+.kpi.warn .val{color:var(--warn-text)} .kpi.crit .val{color:var(--danger-text)}
+.kpi.warn .meter i{background:var(--warn)} .kpi.crit .meter i{background:var(--danger)}
+.kpi canvas{position:absolute;right:0;bottom:0;width:100%;height:34px;opacity:.9;pointer-events:none}
+
+/* ============================== container table ============================== */
+.panel{background:var(--bg-surface);border:1px solid var(--border-default);
+  border-radius:var(--r-lg);box-shadow:var(--shadow-sm),var(--rim);overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+thead th{text-align:left;font-weight:500;color:var(--text-muted);font-size:11.5px;
+  letter-spacing:.03em;padding:10px 14px;border-bottom:1px solid var(--border-subtle)}
+th.r,td.r{text-align:right}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--border-subtle);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr{transition:background var(--dur-fast)}
+tbody tr:hover{background:var(--bg-subtle)}
+tr.sev-warn td:first-child{box-shadow:inset 2px 0 0 var(--warn)}
+tr.sev-crit td:first-child{box-shadow:inset 2px 0 0 var(--danger)}
+.cname{font-weight:600}
+.cimg{color:var(--text-muted);font-family:var(--font-mono);font-size:11.5px;margin-top:1px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:var(--r-full);
+  font-size:12px;font-weight:500;border:1px solid transparent}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.pill.ok{color:var(--ok-text);background:var(--ok-bg)}
+.pill.warn{color:var(--warn-text);background:var(--warn-bg)}
+.pill.crit{color:var(--danger-text);background:var(--danger-bg)}
+.pill.idle{color:var(--text-secondary);background:var(--idle-bg)}
+.health{font-size:12.5px;color:var(--text-secondary)}
+.health.unhealthy{color:var(--danger-text)} .health.starting{color:var(--warn-text)}
+.restarts{font-family:var(--font-mono)}
+.restarts.hot{color:var(--warn-text)}
+.dim{color:var(--text-faint)}
+td.usage{font-family:var(--font-mono);color:var(--text-secondary)}
+.footer{color:var(--text-faint);font-size:11.5px;font-family:var(--font-mono);margin-top:20px;padding:0 2px}
 </style>
 </head>
 <body>
-<header><h1>vitals</h1><span id="ts"></span><a href="/logout">sign out</a></header>
-<main>
-  <div class="gauges" id="gauges"></div>
-  <table><thead><tr><th>container</th><th>state</th><th>health</th><th>restarts</th></tr></thead>
-  <tbody id="rows"></tbody></table>
-</main>
-<script>
-function gauge(label, value, sub) { return `<div class="g"><b>${value}</b><span>${label}${sub?` · ${sub}`:''}</span></div>`; }
+<header>
+  <span class="brand">
+    <svg width="18" height="18" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 50 H34 L44 68 L54 26 L64 50 H86"/></svg>
+    vitals
+  </span>
+  <span class="host" id="host">·&nbsp;<b>—</b></span>
+  <span class="verdict ok" id="verdict"><span class="dot"></span><span id="verdict-txt">checking…</span></span>
+  <span class="spacer"></span>
+  <span class="updated" id="updated"><span class="live"></span>connecting…</span>
+  <button class="iconbtn" id="theme" title="Toggle theme" aria-label="Toggle theme">◑</button>
+  <a class="iconbtn" href="/logout" title="Sign out" aria-label="Sign out">⎋</a>
+</header>
 
-async function tick() {
-  let r;
-  try { r = await fetch('/api/status'); } catch { return; }
-  if (r.status === 401) { location.href = '/'; return; }
-  const d = await r.json();
-  if (!d) { document.getElementById('ts').textContent = 'collecting…'; return; }
-  const h = d.host;
-  document.getElementById('gauges').innerHTML =
-      gauge('cpu', h.cpu_pct.toFixed(1) + '%')
-    + gauge('memory', h.mem_used_pct.toFixed(1) + '%', h.mem_avail_mb + ' MB free')
-    + gauge('disk', h.disk_used_pct.toFixed(1) + '%', h.disk_avail_gb.toFixed(0) + ' GB free')
-    + gauge('load', h.load1.toFixed(2), (h.uptime_secs/86400).toFixed(0) + 'd up');
-  document.getElementById('rows').innerHTML = d.containers
-    .sort((a,b)=>a.name.localeCompare(b.name))
-    .map(c => {
-      const cls = c.state === 'running' ? (c.health === 'unhealthy' ? 'warn' : 'up') : 'down';
-      return `<tr><td>${c.name}</td><td><span class="dot ${cls}"></span>${c.state}</td>`
-           + `<td>${c.health || ''}</td><td>${c.restarts}</td></tr>`;
-    }).join('');
-  document.getElementById('ts').textContent = new Date(d.ts * 1000).toLocaleTimeString();
+<main>
+  <div class="hero" id="hero">Reading the host…</div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="eyebrow">Containers</div>
+  <div class="panel">
+    <table>
+      <thead><tr>
+        <th>Container</th><th>State</th><th>Health</th>
+        <th class="r">CPU</th><th class="r">Memory</th><th class="r">Restarts</th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="6" class="dim" style="padding:20px 14px">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="footer" id="footer"></div>
+</main>
+
+<script>
+/* -------------------- theme -------------------- */
+const root = document.documentElement;
+const savedTheme = localStorage.getItem('vitals-theme');
+if (savedTheme) root.setAttribute('data-theme', savedTheme);
+document.getElementById('theme').onclick = () => {
+  const cur = root.getAttribute('data-theme')
+    || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  localStorage.setItem('vitals-theme', next);
+};
+
+/* -------------------- helpers -------------------- */
+const $ = id => document.getElementById(id);
+const clamp = (n,a,b) => Math.max(a, Math.min(b, n));
+function cssvar(n){ return getComputedStyle(root).getPropertyValue(n).trim(); }
+function relTime(secs){
+  if (secs<60) return secs+'s'; const m=Math.floor(secs/60);
+  if (m<60) return m+'m'; const h=Math.floor(m/60);
+  if (h<24) return h+'h '+(m%60)+'m'; const d=Math.floor(h/24);
+  return d+'d '+(h%24)+'h';
 }
-tick(); setInterval(tick, 5000);
+function levelHost(v, warn, crit){ return v>=crit?'crit':v>=warn?'warn':'ok'; }
+
+/* -------------------- ring buffers for sparklines -------------------- */
+const CAP = 80;
+const rings = {}; // key -> {v:[], }
+function push(key, val){ (rings[key] ??= []).push(val); if (rings[key].length>CAP) rings[key].shift(); }
+function drawSpark(canvas, values, level){
+  const dpr = Math.min(devicePixelRatio||1, 2);
+  const w = canvas.clientWidth||160, h = 34;
+  if (canvas.width !== w*dpr){ canvas.width=w*dpr; canvas.height=h*dpr; }
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+  const n = values.length; if (n<2) return;
+  let min=Math.min(...values), max=Math.max(...values); const span=(max-min)||1;
+  const x=i=>(i/(n-1))*w, y=v=>h-2-((v-min)/span)*(h-6);
+  const color = level==='crit'?cssvar('--danger'):level==='warn'?cssvar('--warn'):cssvar('--accent');
+  ctx.beginPath(); ctx.moveTo(0,h);
+  for(let i=0;i<n;i++) ctx.lineTo(x(i),y(values[i])); ctx.lineTo(w,h); ctx.closePath();
+  const g=ctx.createLinearGradient(0,0,0,h); g.addColorStop(0,color+'2e'); g.addColorStop(1,color+'00');
+  ctx.fillStyle=g; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x(0),y(values[0]));
+  for(let i=1;i<n;i++) ctx.lineTo(x(i),y(values[i]));
+  ctx.strokeStyle=color; ctx.lineWidth=1.4; ctx.stroke();
+}
+
+/* -------------------- KPI cards -------------------- */
+const KPI_DEFS = [
+  { key:'cpu',    label:'CPU' },
+  { key:'memory', label:'Memory' },
+  { key:'disk',   label:'Disk' },
+  { key:'load',   label:'Load' },
+  { key:'swap',   label:'Swap' },
+  { key:'uptime', label:'Uptime' },
+];
+function buildKpis(){
+  $('kpis').innerHTML = KPI_DEFS.map(k => `
+    <div class="kpi" id="kpi-${k.key}">
+      <div class="lbl">${k.label}</div>
+      <div class="val" id="v-${k.key}">—</div>
+      <div class="sub" id="s-${k.key}"></div>
+      <div class="meter"><i id="m-${k.key}"></i></div>
+      <canvas id="c-${k.key}"></canvas>
+    </div>`).join('');
+}
+function setKpi(key, {val, sub, pct, level, spark}){
+  const card=$('kpi-'+key); card.className='kpi'+(level&&level!=='ok'?' '+level:'');
+  $('v-'+key).innerHTML=val; $('s-'+key).textContent=sub||'';
+  const m=$('m-'+key); if(pct==null){ m.parentElement.style.visibility='hidden'; }
+  else { m.parentElement.style.visibility='visible'; m.style.width=clamp(pct,0,100)+'%'; }
+  if (spark!=null){ push(key, spark); drawSpark($('c-'+key), rings[key], level); }
+}
+
+/* -------------------- container severity -------------------- */
+function containerSev(c){
+  const h=(c.health||'').toLowerCase();
+  if (c.state==='restarting' || c.state==='dead' || h==='unhealthy') return 'crit';
+  if (c.state==='exited' || h==='starting') return 'warn';
+  if (c.state!=='running') return 'idle';
+  return 'ok';
+}
+const SEV_RANK={crit:0,warn:1,idle:2,ok:3};
+
+/* -------------------- render -------------------- */
+function renderHost(h){
+  $('host').innerHTML = '·&nbsp;<b>'+ (h.hostname||'host') +'</b>';
+  const cpuL=levelHost(h.cpu_pct,75,90), memL=levelHost(h.mem_used_pct,80,92), diskL=levelHost(h.disk_used_pct,80,90);
+  const swapPct = h.mem_total_mb? (h.swap_used_mb/ (h.mem_total_mb))*100 : 0;
+  setKpi('cpu',{val:h.cpu_pct.toFixed(1)+'<small>%</small>',sub:'', pct:h.cpu_pct, level:cpuL, spark:h.cpu_pct});
+  setKpi('memory',{val:h.mem_used_pct.toFixed(1)+'<small>%</small>',sub:(h.mem_total_mb-h.mem_avail_mb>0?((h.mem_total_mb-h.mem_avail_mb)/1000).toFixed(1):'0')+' / '+(h.mem_total_mb/1000).toFixed(1)+' GB',pct:h.mem_used_pct,level:memL,spark:h.mem_used_pct});
+  setKpi('disk',{val:h.disk_used_pct.toFixed(1)+'<small>%</small>',sub:(h.disk_total_gb-h.disk_avail_gb).toFixed(0)+' / '+h.disk_total_gb.toFixed(0)+' GB',pct:h.disk_used_pct,level:diskL,spark:h.disk_used_pct});
+  setKpi('load',{val:h.load1.toFixed(2),sub:h.load5.toFixed(2)+' · '+h.load15.toFixed(2)+' (5·15m)',pct:null,level:'ok',spark:h.load1});
+  setKpi('swap',{val:(h.swap_used_mb/1000).toFixed(2)+'<small> GB</small>',sub:'', pct:swapPct, level:swapPct>25?'crit':swapPct>5?'warn':'ok', spark:h.swap_used_mb});
+  setKpi('uptime',{val:relTime(h.uptime_secs),sub:'', pct:null, level:'ok', spark:null});
+  return {cpuL,memL,diskL};
+}
+function renderContainers(cs){
+  cs.sort((a,b)=> (SEV_RANK[containerSev(a)]-SEV_RANK[containerSev(b)]) || a.name.localeCompare(b.name));
+  $('rows').innerHTML = cs.map(c=>{
+    const sev=containerSev(c);
+    const pill = sev==='ok'?'ok':sev==='crit'?'crit':sev==='warn'?'warn':'idle';
+    const health = c.health ? `<span class="health ${c.health}">${c.health}</span>` : '<span class="dim">—</span>';
+    const cpu = c.cpu_pct!=null ? c.cpu_pct.toFixed(1)+'%' : '<span class="dim">—</span>';
+    const mem = c.mem_mb!=null ? (c.mem_mb>=1000?(c.mem_mb/1000).toFixed(1)+' GB':c.mem_mb+' MB') : '<span class="dim">—</span>';
+    const rc = c.restarts>0 ? `<span class="restarts hot">↻ ${c.restarts}</span>` : '<span class="restarts dim">0</span>';
+    return `<tr class="sev-${sev}">
+      <td><div class="cname">${c.name}</div><div class="cimg">${c.image}</div></td>
+      <td><span class="pill ${pill}"><span class="dot"></span>${c.state}</span></td>
+      <td>${health}</td>
+      <td class="r usage">${cpu}</td><td class="r usage">${mem}</td>
+      <td class="r">${rc}</td></tr>`;
+  }).join('');
+}
+function renderVerdict(hostL, cs){
+  let worst='ok', crit=0, warn=0;
+  for (const v of Object.values(hostL)){ if(v==='crit')crit++; else if(v==='warn')warn++; }
+  for (const c of cs){ const s=containerSev(c); if(s==='crit')crit++; else if(s==='warn')warn++; }
+  worst = crit?'crit':warn?'warn':'ok';
+  const v=$('verdict'); v.className='verdict '+worst;
+  $('verdict-txt').textContent = worst==='ok' ? 'all systems healthy'
+    : (crit? crit+' critical' : '') + (crit&&warn?' · ':'') + (warn? warn+' degraded' : '');
+  // hero sentence
+  const down = cs.filter(c=>containerSev(c)==='crit');
+  const hero=$('hero');
+  if (worst==='ok') hero.innerHTML = "Everything's nominal — <b>"+cs.filter(c=>c.state==='running').length+"</b> of <b>"+cs.length+"</b> containers running.";
+  else if (down.length) hero.innerHTML = 'Attention: <span class="em-crit">'+down.map(c=>c.name).join(', ')+'</span> '+(down.length>1?'need':'needs')+' a look.';
+  else hero.innerHTML = '<span class="em-warn">'+(crit+warn)+'</span> signal'+((crit+warn)>1?'s':'')+' above threshold.';
+}
+
+/* -------------------- live loop -------------------- */
+const CADENCE=2000, STALE=6000;
+let lastOk=0, backoff=CADENCE;
+async function poll(){
+  const ac=new AbortController(); const t=setTimeout(()=>ac.abort(), CADENCE);
+  try{
+    const r=await fetch('/api/status',{signal:ac.signal});
+    if(r.status===401){ location.href='/'; return; }
+    const d=await r.json();
+    if(d){
+      const hostL=renderHost(d.host);
+      renderContainers(d.containers);
+      renderVerdict(hostL, d.containers);
+      renderFooter(d);
+    }
+    lastOk=Date.now(); backoff=CADENCE; root.classList.remove('stale');
+  }catch(e){
+    backoff=Math.min(backoff*1.6, 20000);
+    if(Date.now()-lastOk>STALE) root.classList.add('stale');
+  }finally{ clearTimeout(t); setTimeout(poll, backoff); }
+}
+function renderFooter(d){
+  $('footer').textContent = `${d.containers.length} containers · host up ${relTime(d.host.uptime_secs)} · vitals`;
+}
+// "updated Ns ago" ticker
+setInterval(()=>{
+  if(!lastOk){ $('updated').innerHTML='<span class="live"></span>connecting…'; return; }
+  const secs=Math.floor((Date.now()-lastOk)/1000);
+  const stale=root.classList.contains('stale');
+  $('updated').innerHTML='<span class="live"></span>'+(stale?'reconnecting · ':'updated ')+relTime(secs)+(stale?'':' ago');
+}, 1000);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ lastOk=lastOk||0; poll(); }});
+
+buildKpis(); poll();
 </script>
 </body>
 </html>

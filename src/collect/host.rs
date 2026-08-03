@@ -5,6 +5,7 @@ use sysinfo::{Disks, System};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HostMetrics {
+    pub hostname: String,
     pub cpu_pct: f32,
     pub mem_total_mb: u64,
     pub mem_avail_mb: u64,
@@ -62,6 +63,7 @@ impl HostCollector {
         let la = System::load_average();
 
         HostMetrics {
+            hostname: System::host_name().unwrap_or_else(|| "host".to_string()),
             cpu_pct,
             mem_total_mb: mem_total / 1_000_000,
             mem_avail_mb: mem_avail / 1_000_000,
