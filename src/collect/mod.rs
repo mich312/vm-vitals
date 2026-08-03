@@ -26,9 +26,9 @@ pub struct Container {
     /// healthy | unhealthy | starting | none, if the container has a healthcheck.
     pub health: Option<String>,
     pub restarts: i64,
-    // cpu/mem per container arrive with the stats collector in a later milestone.
     pub cpu_pct: Option<f32>,
     pub mem_mb: Option<u64>,
+    pub mem_limit_mb: Option<u64>,
 }
 
 /// One tick: gather host metrics and the container list.

@@ -26,6 +26,7 @@ toml = "0.8"
 humantime-serde = "1"          # parse "15s"/"6h" durations in config
 sysinfo = "0.32"               # host cpu/mem/disk/load
 bollard = "0.17"               # Docker API over the socket
+futures-util = "0.3"           # concurrent per-container stats streams
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
