@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vitals</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%233b7bff'/%3E%3Cstop offset='1' stop-color='%231e22e6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='24' y='24' width='464' height='464' rx='116' fill='url(%23g)'/%3E%3Cpath d='M96 268 H196 L242 150 L300 386 L338 300 H392' fill='none' stroke='white' stroke-width='34' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='410' cy='300' r='24' fill='white'/%3E%3C/svg%3E">
 <style>
 :root{
   --blue:#0075ff; --blue2:#2152ff; --cyan:#21d4fd; --violet:#582cff;
@@ -120,6 +121,11 @@ a{color:inherit;text-decoration:none}
 /* charts */
 .chartcard{padding:20px 22px}
 .chartcard canvas{width:100%;display:block}
+.chead{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
+.rtabs{display:flex;gap:2px;background:rgba(255,255,255,.05);padding:3px;border-radius:11px;border:1px solid var(--card-line)}
+.rtab{font:700 11px var(--font);color:var(--ink2);background:transparent;border:0;padding:5px 10px;border-radius:8px;cursor:pointer;letter-spacing:.03em}
+.rtab:hover{color:#fff}
+.rtab.on{background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff;box-shadow:0 4px 12px rgba(0,117,255,.4)}
 .legend{display:flex;gap:16px;margin-top:6px;font-size:12px;color:var(--ink2)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
 .tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:16px}
@@ -149,7 +155,7 @@ tbody tr:last-child td{border-bottom:0}
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="logo"><span class="mk"><svg width="16" height="16" viewBox="0 0 96 96" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 50 H34 L44 68 L54 26 L64 50 H86"/></svg></span>vitals</div>
+    <div class="logo"><span class="mk"><svg width="17" height="17" viewBox="0 0 96 96" fill="none"><path d="M8 52 H32 L42 24 L54 76 L62 56 H73" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="80" cy="56" r="5.5" fill="#fff"/></svg></span>vitals</div>
     <div class="nav active"><span class="ic">▦</span>Dashboard</div>
     <div class="nav" onclick="scrollTo(0,document.body.scrollHeight)"><span class="ic">▤</span>Containers</div>
     <div class="nav"><span class="ic">≣</span>Logs</div>
@@ -193,8 +199,16 @@ tbody tr:last-child td{border-bottom:0}
 
     <div class="grid row-2">
       <div class="card chartcard">
-        <h3>Host overview</h3>
-        <div class="cap"><b id="ov-cap">live</b> · CPU &amp; memory</div>
+        <div class="chead">
+          <div><h3>Host overview</h3><div class="cap"><b id="ov-cap">live</b> · CPU &amp; memory</div></div>
+          <div class="rtabs">
+            <button class="rtab on" data-r="LIVE">LIVE</button>
+            <button class="rtab" data-r="1H">1H</button>
+            <button class="rtab" data-r="6H">6H</button>
+            <button class="rtab" data-r="24H">24H</button>
+            <button class="rtab" data-r="7D">7D</button>
+          </div>
+        </div>
         <canvas id="area" height="220"></canvas>
         <div class="legend"><span><i style="background:var(--cyan)"></i>CPU %</span><span><i style="background:var(--blue)"></i>Memory %</span></div>
       </div>
@@ -259,19 +273,18 @@ function setGauge(id,pct,sub){
   $('gv-'+id).textContent=Math.round(pct)+'%'; $('gl-'+id).textContent=sub||'';
 }
 
-/* ---------- area chart (cpu + mem history) ---------- */
+/* ---------- area chart (cpu + mem history, LIVE or a fetched range) ---------- */
+const chart={mode:'LIVE', cpu:[], mem:[], t:null};
 function drawArea(){
   const cv=$('area'), w=cv.clientWidth||700, h=220, dpr=Math.min(devicePixelRatio||1,2);
   if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr;} const g=cv.getContext('2d');
   g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
   const pad={l:34,r:8,t:10,b:22};
-  // gridlines
-  g.strokeStyle='rgba(255,255,255,.06)'; g.fillStyle='#7079a3'; g.font='10px '+getComputedStyle(document.body).fontFamily;
+  g.strokeStyle='rgba(255,255,255,.06)'; g.fillStyle='#7079a3'; g.font='10px sans-serif'; g.textAlign='left';
   for(let i=0;i<=5;i++){const y=pad.t+(h-pad.t-pad.b)*i/5; g.beginPath();g.moveTo(pad.l,y);g.lineTo(w-pad.r,y);g.stroke();
     g.fillText(100-i*20, 6, y+3);}
-  const series=[['host.cpu','--cyan'],['host.mem','--blue']];
-  for(const [key,c] of series){
-    const v=rings[key]; if(!v||v.length<2)continue; const n=v.length;
+  for(const [v,c] of [[chart.cpu,'--cyan'],[chart.mem,'--blue']]){
+    if(!v||v.length<2)continue; const n=v.length;
     const col=getComputedStyle(document.documentElement).getPropertyValue(c).trim();
     const x=i=>pad.l+(i/(n-1))*(w-pad.l-pad.r), y=val=>pad.t+(1-clamp(val,0,100)/100)*(h-pad.t-pad.b);
     g.beginPath();g.moveTo(x(0),h-pad.b);for(let i=0;i<n;i++)g.lineTo(x(i),y(v[i]));g.lineTo(x(n-1),h-pad.b);g.closePath();
@@ -279,7 +292,31 @@ function drawArea(){
     g.beginPath();g.moveTo(x(0),y(v[0]));for(let i=1;i<n;i++)g.lineTo(x(i),y(v[i]));g.strokeStyle=col;g.lineWidth=2.4;
     g.shadowColor=col;g.shadowBlur=10;g.stroke();g.shadowBlur=0;
   }
+  if(chart.t&&chart.t.length>1){
+    g.fillStyle='#7079a3';g.textAlign='center';const n=chart.t.length;
+    for(let k=0;k<=4;k++){const i=Math.round((n-1)*k/4);const xx=pad.l+(i/(n-1))*(w-pad.l-pad.r);
+      const dt=new Date(chart.t[i]*1000);
+      const lbl=chart.mode==='7D'?(dt.getMonth()+1)+'/'+dt.getDate():String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');
+      g.fillText(lbl,xx,h-6);}
+    g.textAlign='left';
+  }
 }
+async function setRange(mode){
+  chart.mode=mode;
+  document.querySelectorAll('.rtab').forEach(b=>b.classList.toggle('on',b.dataset.r===mode));
+  $('ov-cap').textContent=mode==='LIVE'?'live':mode;
+  if(mode==='LIVE'){chart.t=null;return;}
+  const spans={'1H':3600,'6H':21600,'24H':86400,'7D':604800};
+  const to=Math.floor(Date.now()/1000),from=to-spans[mode];
+  try{
+    const [cpu,mem]=await Promise.all([
+      fetch(`/api/series?metric=host.cpu&from=${from}&to=${to}`).then(r=>r.json()),
+      fetch(`/api/series?metric=host.mem&from=${from}&to=${to}`).then(r=>r.json())]);
+    chart.cpu=cpu.avg; chart.mem=mem.avg; chart.t=cpu.t; drawArea();
+  }catch(e){}
+}
+document.querySelectorAll('.rtab').forEach(b=>b.onclick=()=>setRange(b.dataset.r));
+setInterval(()=>{if(chart.mode!=='LIVE')setRange(chart.mode);},60000);
 
 /* ---------- bar chart (per-container cpu) ---------- */
 let barData=[];
@@ -326,7 +363,8 @@ function render(d){
   setGauge('g-cpu',h.cpu_pct, h.load1.toFixed(2)+' load');
   setGauge('g-mem',h.mem_used_pct, (h.mem_avail_mb/1000).toFixed(1)+'G free');
   // rings + charts
-  push('host.cpu',h.cpu_pct); push('host.mem',h.mem_used_pct); drawArea();
+  push('host.cpu',h.cpu_pct); push('host.mem',h.mem_used_pct);
+  if(chart.mode==='LIVE'){chart.cpu=rings['host.cpu'];chart.mem=rings['host.mem'];chart.t=null;drawArea();}
   barData=cs.filter(c=>c.cpu_pct!=null).map(c=>({name:c.name,cpu:c.cpu_pct})).sort((a,b)=>b.cpu-a.cpu); drawBars();
   $('t-run').textContent=cs.filter(c=>c.state==='running').length;
   $('t-mem').textContent=(cs.reduce((s,c)=>s+(c.mem_mb||0),0)/1000).toFixed(1)+' GB';

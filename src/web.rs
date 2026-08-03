@@ -5,17 +5,19 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Request, State},
+    extract::{Query, Request, State},
     http::{header, StatusCode},
     middleware::{from_fn_with_state, Next},
     response::Response,
     routing::{get, post},
     Json, Router,
 };
+use serde::Deserialize;
 use tokio::sync::RwLock;
 
 use crate::auth::{self, AuthState};
 use crate::collect::Snapshot;
+use crate::store::Store;
 
 /// Latest snapshot, shared between the collector loop and the web handlers.
 pub type Shared = Arc<RwLock<Option<Snapshot>>>;
@@ -27,12 +29,15 @@ pub struct AppState {
     pub token: Option<String>,
     /// Passkey auth for the dashboard. None = dashboard unauthenticated.
     pub auth: Option<AuthState>,
+    /// Time-series history store.
+    pub store: Arc<Store>,
 }
 
 pub fn router(state: AppState) -> Router {
     // /api/* : bearer token OR a valid dashboard session.
     let api = Router::new()
         .route("/api/status", get(status))
+        .route("/api/series", get(series))
         .route_layer(from_fn_with_state(state.clone(), require_api_auth));
 
     Router::new()
@@ -50,6 +55,20 @@ pub fn router(state: AppState) -> Router {
 
 async fn status(State(state): State<AppState>) -> Json<Option<Snapshot>> {
     Json(state.snapshot.read().await.clone())
+}
+
+#[derive(Deserialize)]
+struct SeriesQuery {
+    metric: String,
+    from: i64,
+    to: i64,
+    res: Option<i64>,
+}
+
+async fn series(State(state): State<AppState>, Query(q): Query<SeriesQuery>) -> Json<serde_json::Value> {
+    let res = q.res.unwrap_or_else(|| crate::store::pick_res(q.to - q.from));
+    let s = state.store.series(&q.metric, q.from, q.to, res);
+    Json(serde_json::json!({ "res": res, "t": s.t, "avg": s.avg, "min": s.min, "max": s.max }))
 }
 
 async fn require_api_auth(
