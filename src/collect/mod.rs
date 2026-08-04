@@ -15,6 +15,54 @@ pub struct Snapshot {
     pub containers: Vec<Container>,
 }
 
+/// A noteworthy transition between two snapshots (restart, health flip, state
+/// change, container appear/disappear). Kept in a small ring for the "recent
+/// events" strip.
+#[derive(Debug, Clone, Serialize)]
+pub struct Event {
+    pub ts: u64,
+    pub container: String,
+    /// restart | health | state | up | down
+    pub kind: String,
+    pub detail: String,
+}
+
+/// Diff two container lists (by name) into events. `prev` is the earlier tick.
+pub fn diff_events(prev: &[Container], next: &[Container], ts: u64) -> Vec<Event> {
+    let mut out = Vec::new();
+    let ev = |c: &str, kind: &str, detail: String| Event {
+        ts,
+        container: c.to_string(),
+        kind: kind.to_string(),
+        detail,
+    };
+    for n in next {
+        match prev.iter().find(|p| p.name == n.name) {
+            None => out.push(ev(&n.name, "up", format!("appeared ({})", n.state))),
+            Some(p) => {
+                if n.restarts > p.restarts {
+                    out.push(ev(&n.name, "restart", format!("restarted (×{})", n.restarts)));
+                }
+                if p.state != n.state {
+                    out.push(ev(&n.name, "state", format!("{} → {}", p.state, n.state)));
+                }
+                if p.health != n.health {
+                    if let Some(h) = &n.health {
+                        let from = p.health.as_deref().unwrap_or("none");
+                        out.push(ev(&n.name, "health", format!("health {from} → {h}")));
+                    }
+                }
+            }
+        }
+    }
+    for p in prev {
+        if !next.iter().any(|n| n.name == p.name) {
+            out.push(ev(&p.name, "down", "disappeared".to_string()));
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Container {
     pub name: String,

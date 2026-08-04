@@ -27,6 +27,8 @@ use crate::store::Store;
 
 /// Latest snapshot, shared between the collector loop and the web handlers.
 pub type Shared = Arc<RwLock<Option<Snapshot>>>;
+/// Recent-events ring (newest first), shared with the collector loop.
+pub type Events = Arc<std::sync::Mutex<std::collections::VecDeque<crate::collect::Event>>>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -39,6 +41,8 @@ pub struct AppState {
     pub store: Arc<Store>,
     /// Docker handle for the live-log SSE stream. None = no socket.
     pub docker: Option<bollard::Docker>,
+    /// Recent-events ring for the dashboard "recent activity" strip.
+    pub events: Events,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -46,6 +50,7 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/api/status", get(status))
         .route("/api/series", get(series))
+        .route("/api/events", get(events))
         .route("/api/logs/:name", get(logs))
         .route("/mcp", post(crate::mcp::handle))
         .route_layer(from_fn_with_state(state.clone(), require_api_auth));
@@ -79,6 +84,12 @@ async fn series(State(state): State<AppState>, Query(q): Query<SeriesQuery>) -> 
     let res = q.res.unwrap_or_else(|| crate::store::pick_res(q.to - q.from));
     let s = state.store.series(&q.metric, q.from, q.to, res);
     Json(serde_json::json!({ "res": res, "t": s.t, "avg": s.avg, "min": s.min, "max": s.max }))
+}
+
+/// Recent events (newest first), capped.
+async fn events(State(state): State<AppState>) -> Json<Vec<crate::collect::Event>> {
+    let q = state.events.lock().map(|q| q.iter().take(40).cloned().collect()).unwrap_or_default();
+    Json(q)
 }
 
 /// Live container logs as Server-Sent Events. The browser's `EventSource`

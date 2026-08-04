@@ -41,18 +41,42 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // Recent-events ring (restarts, health/state flips, appear/disappear).
+    let events: web::Events = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+
     // Collector loop.
     let coll = snapshot.clone();
     let store_w = store.clone();
+    let events_w = events.clone();
     let tick = cfg.interval;
     let docker_loop = docker.clone();
     tokio::spawn(async move {
         let docker = docker_loop;
         let mut host = collect::host::HostCollector::new();
         let mut iv = interval(tick);
+        let mut prev: Vec<collect::Container> = Vec::new();
+        let mut seeded = false;
         loop {
             iv.tick().await;
             let snap = collect::collect(&mut host, docker.as_ref()).await;
+
+            // Diff against the previous tick into the events ring (skip the
+            // first tick so we don't flood with "appeared" on startup).
+            if seeded {
+                let evs = collect::diff_events(&prev, &snap.containers, snap.ts);
+                if !evs.is_empty() {
+                    if let Ok(mut q) = events_w.lock() {
+                        for e in evs {
+                            q.push_front(e);
+                        }
+                        while q.len() > 100 {
+                            q.pop_back();
+                        }
+                    }
+                }
+            }
+            prev = snap.containers.clone();
+            seeded = true;
 
             // Persist raw samples for the history charts (host + per-container).
             let mut pts: Vec<(String, f64)> = vec![
@@ -61,6 +85,8 @@ async fn main() -> anyhow::Result<()> {
                 ("host.disk".into(), snap.host.disk_used_pct as f64),
                 ("host.load".into(), snap.host.load1),
                 ("host.swap".into(), snap.host.swap_used_mb as f64),
+                ("host.net_rx".into(), snap.host.net_rx_bps as f64),
+                ("host.net_tx".into(), snap.host.net_tx_bps as f64),
             ];
             for c in &snap.containers {
                 if let Some(v) = c.cpu_pct {
@@ -117,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
         auth,
         store,
         docker,
+        events,
     };
     let listener = tokio::net::TcpListener::bind(cfg.web_bind).await?;
     tracing::info!(

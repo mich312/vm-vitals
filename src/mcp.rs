@@ -125,6 +125,7 @@ async fn call_tool(state: &AppState, name: &str, args: &Value) -> Result<String,
                 "disk_total_gb": s.host.disk_total_gb,
                 "disk_avail_gb": s.host.disk_avail_gb,
                 "load1": s.host.load1, "load5": s.host.load5, "load15": s.host.load15,
+                "net_rx_bps": s.host.net_rx_bps, "net_tx_bps": s.host.net_tx_bps,
                 "uptime_secs": s.host.uptime_secs
             }))
             .unwrap())
