@@ -564,10 +564,48 @@ $('events').addEventListener('click',e=>{const ev=e.target.closest('.ev[data-c]'
 const LOGCAP=800;
 function setLogStat(t,cls){$('logstat-t').textContent=t;const s=$('logstat');s.classList.remove('paused','dead');if(cls)s.classList.add(cls);}
 function logLevel(s,m){return /\b(error|err|fatal|panic|fail)\b/i.test(m)?'err':/\b(warn|warning)\b/i.test(m)?'warn':(s==='err'?'err':'');}
+/* ANSI SGR → HTML (colors, bold/dim/italic/underline). Any escape sequence is
+   consumed so nothing renders as a stray glyph; text is HTML-escaped. */
+const ANSI_RE=/\x1b\[[0-9;?]*[ -\/]*[@-~]/g;
+const ANSI_FG={30:'#5a626d',31:'#e5484d',32:'#3fb265',33:'#e0a032',34:'#6a7bff',35:'#c678dd',36:'#5bd1e6',37:'#a8b0ba',
+  90:'#7d8794',91:'#f06a6f',92:'#5ecb83',93:'#f0c05a',94:'#8b9bff',95:'#d68bf0',96:'#7fe0f0',97:'#e8eaed'};
+function xterm256(n){n=+n||0;
+  const b=['#000','#cd0000','#00cd00','#cdcd00','#0000ee','#cd00cd','#00cdcd','#e5e5e5','#7f7f7f','#ff5555','#55ff55','#ffff55','#5c5cff','#ff55ff','#55ffff','#fff'];
+  if(n<16)return b[n];
+  if(n<232){n-=16;const r=Math.floor(n/36),g=Math.floor((n%36)/6),c=n%6,cv=v=>v?55+v*40:0;return `rgb(${cv(r)},${cv(g)},${cv(c)})`;}
+  const v=8+(n-232)*10;return `rgb(${v},${v},${v})`;}
+function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function ansiToHtml(str){
+  let res='',last=0,m;const cur={fg:null,bold:false,dim:false,it:false,ul:false};
+  const flush=t=>{if(!t)return;t=esc(t.replace(/\x1b/g,''));
+    if(cur.fg||cur.bold||cur.dim||cur.it||cur.ul){let st='';
+      if(cur.fg)st+='color:'+cur.fg+';';if(cur.bold)st+='font-weight:600;';if(cur.dim)st+='opacity:.6;';
+      if(cur.it)st+='font-style:italic;';if(cur.ul)st+='text-decoration:underline;';
+      res+='<span style="'+st+'">'+t+'</span>';}else res+=t;};
+  ANSI_RE.lastIndex=0;
+  while((m=ANSI_RE.exec(str))){
+    flush(str.slice(last,m.index));last=ANSI_RE.lastIndex;
+    if(!m[0].endsWith('m'))continue; // only SGR carries styling
+    const codes=(m[0].slice(2,-1)||'0').split(';').map(Number);
+    for(let k=0;k<codes.length;k++){const c=codes[k];
+      if(c===0)Object.assign(cur,{fg:null,bold:false,dim:false,it:false,ul:false});
+      else if(c===1)cur.bold=true;else if(c===2)cur.dim=true;else if(c===3)cur.it=true;else if(c===4)cur.ul=true;
+      else if(c===22){cur.bold=false;cur.dim=false;}else if(c===23)cur.it=false;else if(c===24)cur.ul=false;
+      else if(c===39)cur.fg=null;
+      else if((c>=30&&c<=37)||(c>=90&&c<=97))cur.fg=ANSI_FG[c];
+      else if(c===38){if(codes[k+1]===5){cur.fg=xterm256(codes[k+2]);k+=2;}else if(codes[k+1]===2){cur.fg=`rgb(${codes[k+2]||0},${codes[k+3]||0},${codes[k+4]||0})`;k+=4;}}
+    }
+  }
+  flush(str.slice(last));
+  return res;
+}
 function appendLine(s,m){
-  const f=dw.filter;if(f&&!m.toLowerCase().includes(f))return;
+  const plain=m.replace(ANSI_RE,'');
+  const f=dw.filter;if(f&&!plain.toLowerCase().includes(f))return;
   const box=$('logview'),el=document.createElement('span');
-  el.className='ln '+logLevel(s,m);el.textContent=m;box.appendChild(el);
+  if(m.indexOf('\x1b')>=0){el.className='ln';el.innerHTML=ansiToHtml(m);}
+  else{el.className='ln '+logLevel(s,plain);el.textContent=m;}
+  box.appendChild(el);
   while(box.children.length>LOGCAP)box.removeChild(box.firstChild);
   if(dw.follow)box.scrollTop=box.scrollHeight;
 }
