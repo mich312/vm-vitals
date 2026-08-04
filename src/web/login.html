@@ -43,20 +43,32 @@
   .err{color:var(--crit);min-height:1.2em;margin-top:12px;font-size:12.5px}
   .foot{margin-top:18px;font-size:11px;color:var(--ink-3)}
   .foot a{color:var(--ink-2);text-decoration:none}.foot a:hover{color:var(--accent)}
+  .tagline{color:var(--ink-3);font-size:12.5px;margin:3px 0 2px}
+  .caps{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:16px 0 2px}
+  .caps .cap{font:10px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);
+    background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+  .bgsignal{position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);width:100%;height:120px;z-index:0;opacity:.45}
+  .bgsignal .b{fill:none;stroke:var(--line);stroke-width:1.5}
+  .bgsignal .p{fill:none;stroke:var(--accent);stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;
+    filter:drop-shadow(0 0 4px rgba(33,224,198,.4));stroke-dasharray:70 1130;animation:sweep 4s linear infinite}
+  @keyframes sweep{from{stroke-dashoffset:1200}to{stroke-dashoffset:0}}
+  @media (prefers-reduced-motion: reduce){.bgsignal .p{animation:none;opacity:.5}}
 </style>
 </head>
 <body>
+<svg class="bgsignal" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true">
+  <polyline class="b" id="bg-b" points=""/>
+  <polyline class="p" id="bg-p" points=""/>
+</svg>
 <main>
   <div class="mk"><svg width="24" height="24" viewBox="0 0 96 96" fill="none"><path d="M8 52 H32 L42 24 L54 76 L62 56 H73" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="80" cy="56" r="5.5" fill="currentColor"/></svg></div>
   <h1>vitals</h1>
-  <svg class="ekg" viewBox="0 0 240 48" preserveAspectRatio="none" aria-hidden="true">
-    <polyline class="base" pathLength="400" points="0,24 84,24 94,24 101,10 113,40 123,24 146,24 240,24"/>
-    <polyline class="pulse" pathLength="400" points="0,24 84,24 94,24 101,10 113,40 123,24 146,24 240,24"/>
-  </svg>
+  <div class="tagline">Host &amp; Docker vitals — self-hosted.</div>
   <p id="sub">…</p>
   <button id="primary" hidden></button>
+  <div class="caps"><span class="cap">CPU</span><span class="cap">Memory</span><span class="cap">Disk</span><span class="cap">Network</span><span class="cap">Logs</span></div>
   <div class="err" id="err"></div>
-  <div class="foot">Self-hosted · <a href="https://github.com/mich312/vm-vitals" target="_blank">vm-vitals</a></div>
+  <div class="foot"><a href="https://github.com/mich312/vm-vitals" target="_blank">github.com/mich312/vm-vitals</a></div>
 </main>
 <script>
 const b64uToBuf = s => { s = s.replace(/-/g,'+').replace(/_/g,'/'); s += '='.repeat((4 - s.length % 4) % 4);
@@ -108,6 +120,16 @@ async function login() {
   else { sub.textContent = 'Set up the admin account.'; btn.innerHTML = KEY + '<span>Create account with passkey</span>'; btn.onclick = register; }
   btn.hidden = false;
 })().catch(e => err.textContent = e.message);
+
+// ambient EKG behind the card
+(function(){const W=1200,mid=60,beat=150,p=[[0,mid]];
+  for(let x=0;x<W;x+=beat){const b=x+beat*0.5;
+    p.push([b-14,mid],[b-8,mid-26],[b-2,mid+30],[b+4,mid-8],[b+10,mid],[x+beat,mid]);}
+  p.push([W,mid]);
+  const s=p.map(q=>q[0].toFixed(0)+','+q[1]).join(' ');
+  document.getElementById('bg-b').setAttribute('points',s);
+  document.getElementById('bg-p').setAttribute('points',s);
+})();
 </script>
 </body>
 </html>

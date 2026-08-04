@@ -80,10 +80,9 @@ h3{font-size:13px;font-weight:600;margin:0;letter-spacing:-.01em}
 
 /* ---------------- status line ---------------- */
 .statusline{display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:10px;margin-bottom:20px;
-  background:var(--surface-1);border:1px solid var(--line);border-left:3px solid var(--idle);box-shadow:inset 0 1px 0 var(--edge-hi)}
-.statusline.ok{border-left-color:var(--ok)}
-.statusline.warn{border-left-color:var(--warn);background:linear-gradient(90deg,rgba(230,168,46,.05),transparent 60%)}
-.statusline.crit{border-left-color:var(--crit);background:linear-gradient(90deg,rgba(240,85,90,.08),transparent 60%)}
+  background:var(--surface-1);border:1px solid var(--line);box-shadow:inset 0 1px 0 var(--edge-hi)}
+.statusline.warn{border-left:3px solid var(--warn);background:linear-gradient(90deg,rgba(230,168,46,.05),transparent 60%)}
+.statusline.crit{border-left:3px solid var(--crit);background:linear-gradient(90deg,rgba(240,85,90,.08),transparent 60%)}
 .st-ico{font-size:15px;line-height:1;display:inline-block}
 .statusline.ok .st-ico{color:var(--ok)} .statusline.warn .st-ico{color:var(--warn)} .statusline.crit .st-ico{color:var(--crit)}
 .statusline.crit .st-ico{animation:lubdub var(--pulse-period) var(--ease-settle) infinite}
@@ -148,8 +147,17 @@ h3{font-size:13px;font-weight:600;margin:0;letter-spacing:-.01em}
 .kpi .spark{height:44px}
 
 /* charts */
-.chartcard{padding:16px 18px}
+.chartcard{padding:16px 18px;position:relative}
 .chartcard canvas{width:100%;display:block}
+#area{cursor:crosshair}
+#chart-tip{position:absolute;pointer-events:none;z-index:5;background:var(--surface-3);border:1px solid var(--line);
+  border-radius:8px;padding:7px 9px;font:11px var(--mono);color:var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.55);
+  white-space:nowrap;opacity:0;transition:opacity .1s;transform:translate(-50%,0)}
+#chart-tip.on{opacity:1}
+#chart-tip .tt{color:var(--ink-3);margin-bottom:4px}
+#chart-tip .r{display:flex;align-items:center;gap:7px;line-height:1.5}
+#chart-tip .r b{margin-left:auto;font-weight:600}
+#chart-tip .sw{width:9px;height:2px;border-radius:1px;display:inline-block}
 .chead{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px;gap:12px}
 .cap{font-size:12px;color:var(--ink-3);margin-top:3px}
 .cap b{color:var(--ok);font-weight:600}
@@ -316,6 +324,7 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
           </div>
         </div>
         <canvas id="area" height="200"></canvas>
+        <div id="chart-tip"></div>
         <div class="legend"><span><i style="background:var(--series-1)"></i>CPU %</span><span><i style="background:var(--series-2)"></i>Memory %</span></div>
       </div>
       <div class="card events-card">
@@ -399,6 +408,7 @@ function fmtBps(b){if(b<1000)return Math.round(b)+' B';if(b<1e6)return (b/1e3).t
 
 /* ring buffers */
 const CAP=60, rings={};
+let liveT=[];
 const push=(k,v)=>{(rings[k]??=[]).push(v);if(rings[k].length>CAP)rings[k].shift();};
 
 /* ---------- sparkline (SVG) — one micro-instrument: trace + "now" marker ---------- */
@@ -434,7 +444,7 @@ function kpiNet(h,ring){
 }
 
 /* ---------- area chart (host cpu+mem, LIVE or fetched range) ---------- */
-const chart={mode:'LIVE',cpu:[],mem:[],t:null};
+const chart={mode:'LIVE',cpu:[],mem:[],t:null,hover:null};
 function drawArea(){
   const cv=$('area'),w=cv.clientWidth||700,h=200,dpr=Math.min(devicePixelRatio||1,2);
   if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr;}
@@ -469,6 +479,12 @@ function drawArea(){
     g.fillStyle=hg;g.beginPath();g.arc(px,py,11,0,7);g.fill();
     g.strokeStyle=c+'cc';g.lineWidth=1.5;g.beginPath();g.arc(px,py,4.5,0,7);g.stroke();
     g.fillStyle=c;g.beginPath();g.arc(px,py,3,0,7);g.fill();}
+  // hover crosshair (value/time readout)
+  if(chart.hover!=null&&chart.cpu&&chart.cpu.length>1){const idx=clamp(chart.hover,0,chart.cpu.length-1);
+    const {x,y}=dim(chart.cpu),cx=x(idx);
+    g.strokeStyle='rgba(255,255,255,.28)';g.setLineDash([2,3]);g.beginPath();g.moveTo(cx,pad.t);g.lineTo(cx,h-pad.b);g.stroke();g.setLineDash([]);
+    const bead=(vv,col)=>{if(vv==null)return;const yy=y(vv);g.fillStyle=col;g.beginPath();g.arc(cx,yy,3.5,0,7);g.fill();g.fillStyle='#0A0C0F';g.beginPath();g.arc(cx,yy,1.4,0,7);g.fill();};
+    bead(chart.cpu[idx],HEX.series1);if(chart.mem)bead(chart.mem[idx],HEX.series2);}
   if(chart.t&&chart.t.length>1){g.fillStyle=HEX.idle;g.textAlign='center';const n=chart.t.length;
     for(let k=0;k<=4;k++){const i=Math.round((n-1)*k/4),xx=pad.l+(i/(n-1))*(w-pad.l-pad.r),dt=new Date(chart.t[i]*1000);
       const lbl=chart.mode==='7D'?(dt.getMonth()+1)+'/'+dt.getDate():String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');
@@ -488,6 +504,38 @@ async function setRange(mode){
 }
 document.querySelectorAll('.rtabs [data-r]').forEach(b=>b.onclick=()=>setRange(b.dataset.r));
 setInterval(()=>{if(chart.mode!=='LIVE')setRange(chart.mode);},60000);
+
+/* chart hover crosshair — value + timestamp readout */
+function getTimes(){return chart.mode==='LIVE'?liveT:(chart.t||[]);}
+function fmtClock(ts){const d=new Date(ts*1000),p=n=>String(n).padStart(2,'0');
+  const t=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  return (chart.mode==='24H'||chart.mode==='7D')?((d.getMonth()+1)+'/'+d.getDate()+' '+t):t;}
+(function(){const cv=$('area');if(!cv)return;const PAD={l:30,r:20};
+  cv.addEventListener('mousemove',e=>{
+    const vals=chart.cpu;if(!vals||vals.length<2)return;
+    const rect=cv.getBoundingClientRect(),w=cv.clientWidth,innerW=w-PAD.l-PAD.r;
+    let frac=(e.clientX-rect.left-PAD.l)/innerW;frac=clamp(frac,0,1);
+    const n=vals.length,idx=Math.round(frac*(n-1));
+    chart.hover=idx;drawArea();
+    const times=getTimes(),ts=times&&times[idx];
+    const cpuV=chart.cpu[idx],memV=chart.mem?chart.mem[idx]:null,tip=$('chart-tip');
+    tip.innerHTML=`<div class="tt">${ts?fmtClock(ts):'—'}</div>`+
+      `<div class="r"><span class="sw" style="background:var(--series-1)"></span>CPU<b>${cpuV!=null?cpuV.toFixed(1)+'%':'—'}</b></div>`+
+      `<div class="r"><span class="sw" style="background:var(--series-2)"></span>MEM<b>${memV!=null?memV.toFixed(0)+'%':'—'}</b></div>`;
+    const px=PAD.l+(idx/(n-1))*innerW;
+    tip.style.left=(cv.offsetLeft+clamp(px,70,w-70))+'px';tip.style.top=(cv.offsetTop+6)+'px';tip.classList.add('on');
+  });
+  cv.addEventListener('mouseleave',()=>{chart.hover=null;drawArea();$('chart-tip').classList.remove('on');});
+})();
+
+/* KPI sparklines show a longer history window (6h), refreshed periodically */
+let kpiHist={cpu:null,mem:null,disk:null,net:null};
+async function loadKpiHist(){
+  const to=Math.floor(Date.now()/1000),from=to-21600;
+  const g=async m=>{try{return (await fetch(`/api/series?metric=${m}&from=${from}&to=${to}`).then(r=>r.json())).avg||null;}catch(_){return null;}};
+  const [c,mm,d,nr]=await Promise.all([g('host.cpu'),g('host.mem'),g('host.disk'),g('host.net_rx')]);
+  if(c&&c.length)kpiHist.cpu=c;if(mm&&mm.length)kpiHist.mem=mm;if(d&&d.length)kpiHist.disk=d;if(nr&&nr.length)kpiHist.net=nr;
+}
 
 /* ---------- container severity ---------- */
 function sev(c){const h=(c.health||'').toLowerCase();
@@ -523,14 +571,16 @@ function render(d){
   $('host').textContent=h.hostname;
   // rings
   push('host.cpu',h.cpu_pct);push('host.mem',h.mem_used_pct);push('host.disk',h.disk_used_pct);push('host.net',h.net_rx_bps||0);
+  liveT.push(Math.floor(Date.now()/1000));if(liveT.length>CAP)liveT.shift();
   for(const c of cs){if(c.cpu_pct!=null)push('c.'+c.name+'.cpu',c.cpu_pct);}
   // kpis
   const cpuL=lvl(h.cpu_pct,75,90),memL=lvl(h.mem_used_pct,80,92),diskL=lvl(h.disk_used_pct,80,90);
+  const sp=(hist,cur)=>{const a=hist&&hist.length?hist.slice(-160):[];a.push(cur);return a;};
   $('kpis').innerHTML=
-    kpi('CPU',h.cpu_pct.toFixed(1),'%',`load ${h.load1.toFixed(2)} · ${h.load5.toFixed(2)} · ${h.load15.toFixed(2)}`,cpuL,rings['host.cpu'],HEX.series1)+
-    kpi('Memory',h.mem_used_pct.toFixed(0),'%',`${fmtMem(h.mem_total_mb-h.mem_avail_mb)} of ${fmtMem(h.mem_total_mb)}`,memL,rings['host.mem'],HEX.series2)+
-    kpi('Disk',h.disk_used_pct.toFixed(0),'%',`${h.disk_avail_gb.toFixed(0)}G free of ${h.disk_total_gb.toFixed(0)}G`,diskL,rings['host.disk'],HEX.series3)+
-    kpiNet(h,rings['host.net']);
+    kpi('CPU',h.cpu_pct.toFixed(1),'%',`load ${h.load1.toFixed(2)} · ${h.load5.toFixed(2)} · ${h.load15.toFixed(2)}`,cpuL,sp(kpiHist.cpu||rings['host.cpu'],h.cpu_pct),HEX.series1)+
+    kpi('Memory',h.mem_used_pct.toFixed(0),'%',`${fmtMem(h.mem_total_mb-h.mem_avail_mb)} of ${fmtMem(h.mem_total_mb)}`,memL,sp(kpiHist.mem||rings['host.mem'],h.mem_used_pct),HEX.series2)+
+    kpi('Disk',h.disk_used_pct.toFixed(0),'%',`${h.disk_avail_gb.toFixed(0)}G free of ${h.disk_total_gb.toFixed(0)}G`,diskL,sp(kpiHist.disk||rings['host.disk'],h.disk_used_pct),HEX.series3)+
+    kpiNet(h,sp(kpiHist.net||rings['host.net'],h.net_rx_bps||0));
   // trend live
   if(chart.mode==='LIVE'){chart.cpu=rings['host.cpu'];chart.mem=rings['host.mem'];chart.t=null;drawArea();}
   // verdict
@@ -788,6 +838,7 @@ setInterval(()=>{const u=$('upd-text');if(!u)return;if(!lastOk){u.textContent='c
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
 addEventListener('resize',()=>{drawArea();if(dw.name&&$('pane-over').classList.contains('on'))loadDrawerCharts();});
 loadEvents();setInterval(loadEvents,5000);
+loadKpiHist();setInterval(loadKpiHist,60000);
 poll();
 </script>
 </body>
