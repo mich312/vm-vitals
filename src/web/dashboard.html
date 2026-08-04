@@ -7,18 +7,35 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236a7bff'/%3E%3Cstop offset='1' stop-color='%234555d6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='24' y='24' width='464' height='464' rx='116' fill='url(%23g)'/%3E%3Cpath d='M96 268 H196 L242 150 L300 386 L338 300 H392' fill='none' stroke='white' stroke-width='34' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='410' cy='300' r='24' fill='white'/%3E%3C/svg%3E">
 <style>
 :root{
-  --bg:#0b0d10; --surface-1:#121519; --surface-2:#171b21; --surface-3:#1c2128;
-  --line:#232830; --line-soft:#1b1f25;
-  --ink:#e8eaed; --ink-2:#a8b0ba; --ink-3:#7d8794;
-  --accent:#6a7bff; --accent-dim:#2a3050;
-  --ok:#3fb265; --warn:#e0a032; --crit:#e5484d; --idle:#6b7280;
-  --cyan:#5bd1e6; --violet:#8b7bff;
+  /* surfaces — the instrument casing */
+  --bg:#0A0C0F; --surface-1:#101318; --surface-2:#161A20; --surface-3:#1D222A;
+  --line:#262C35; --line-soft:#191D23; --edge-hi:rgba(255,255,255,.03);
+  /* ink ramp (WCAG-verified on --bg) */
+  --ink:#ECEEF2; --ink-2:#AEB6C0; --ink-3:#7E8896; --ink-4:#58606B;
+  /* accent — Pulse (signal teal); live/active/focus only, never a data series */
+  --pulse:#21E0C6; --pulse-bright:#5CF0DC; --pulse-dim:#14A491;
+  --pulse-ghost:rgba(33,224,198,.12); --pulse-line:rgba(33,224,198,.30);
+  --accent:var(--pulse); --accent-dim:var(--pulse-ghost);
+  /* state — reserved semantics */
+  --ok:#33C66E; --warn:#E6A82E; --crit:#F0555A; --idle:#6B7480;
+  /* data series — cool arc, disjoint from the accent */
+  --series-1:#45B8FF; --series-2:#A78BFF; --series-3:#6E8BF0; --series-4:#4FC3D6;
+  --grid-line:rgba(120,150,180,.05);
+  /* motion — one heartbeat clock, set from health by JS */
+  --pulse-period:2000ms; --beat-color:var(--ok);
+  --ease-settle:cubic-bezier(.22,1,.36,1); --ease-inout:cubic-bezier(.65,0,.35,1);
+  --dur-fast:120ms; --dur-base:220ms; --dur-slow:340ms;
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:var(--font);color:var(--ink);background:var(--bg);
-  font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5}
+body{margin:0;font-family:var(--font);color:var(--ink);
+  font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5;
+  background:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+    var(--bg);
+  background-size:32px 32px, 32px 32px, auto}
 a{color:inherit;text-decoration:none}
 .mono{font-family:var(--mono)}
 .dim{color:var(--ink-3)}
@@ -55,22 +72,48 @@ h3{font-size:13px;font-weight:600;margin:0;letter-spacing:-.01em}
 .ph-host{font-size:19px;font-weight:600;letter-spacing:-.02em}
 .ph-meta{margin-left:auto}
 .updated{color:var(--ink-3);font-size:12px;font-family:var(--mono)}
-.updated .lv{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:6px;vertical-align:middle}
-.stale .updated .lv{background:var(--warn)}
+.updated .lv{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--beat-color);margin-right:7px;vertical-align:middle;box-shadow:0 0 6px var(--beat-color)}
+.stale .updated .lv{background:var(--warn);box-shadow:none}
 
 .cpy{cursor:pointer}
 .cpy:hover{text-decoration:underline dotted;text-underline-offset:3px;text-decoration-color:var(--ink-3)}
 
 /* ---------------- status line ---------------- */
 .statusline{display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:10px;margin-bottom:20px;
-  background:var(--surface-1);border:1px solid var(--line);border-left:3px solid var(--idle)}
+  background:var(--surface-1);border:1px solid var(--line);border-left:3px solid var(--idle);box-shadow:inset 0 1px 0 var(--edge-hi)}
 .statusline.ok{border-left-color:var(--ok)}
-.statusline.warn{border-left-color:var(--warn);background:linear-gradient(90deg,rgba(224,160,50,.05),transparent 60%)}
-.statusline.crit{border-left-color:var(--crit);background:linear-gradient(90deg,rgba(229,72,77,.07),transparent 60%)}
-.st-ico{font-size:15px;line-height:1}
+.statusline.warn{border-left-color:var(--warn);background:linear-gradient(90deg,rgba(230,168,46,.05),transparent 60%)}
+.statusline.crit{border-left-color:var(--crit);background:linear-gradient(90deg,rgba(240,85,90,.08),transparent 60%)}
+.st-ico{font-size:15px;line-height:1;display:inline-block}
 .statusline.ok .st-ico{color:var(--ok)} .statusline.warn .st-ico{color:var(--warn)} .statusline.crit .st-ico{color:var(--crit)}
-.statusline.crit .st-ico{animation:pulse 1.8s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.statusline.crit .st-ico{animation:lubdub var(--pulse-period) var(--ease-settle) infinite}
+/* ---- the heartbeat: one clock, radial ping fired on data arrival ---- */
+@keyframes beat{0%{transform:scale(1)}16%{transform:scale(1.7)}100%{transform:scale(1)}}
+@keyframes lubdub{0%{transform:scale(1)}8%{transform:scale(1.28)}16%{transform:scale(1)}24%{transform:scale(1.22)}40%{transform:scale(1)}100%{transform:scale(1)}}
+.beat{animation:beat var(--pulse-period) var(--ease-settle)}
+/* ---- the signal line: sweeps when fresh, flatlines when stale ---- */
+.signalwrap{height:20px;margin:-2px 0 16px;overflow:hidden}
+.signal{width:100%;height:20px;display:block}
+.signal .sig-base{fill:none;stroke:var(--line);stroke-width:1.5}
+.signal .sig-flat{fill:none;stroke:var(--line);stroke-width:1.5;opacity:0}
+.signal .sig-pulse{fill:none;stroke:var(--pulse);stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;
+  filter:drop-shadow(0 0 3px var(--pulse-line));stroke-dasharray:60 1140;animation:trace 3.6s linear infinite}
+@keyframes trace{from{stroke-dashoffset:1200}to{stroke-dashoffset:0}}
+.stale .signal .sig-base{opacity:0}
+.stale .signal .sig-flat{opacity:.7}
+.stale .signal .sig-pulse{animation-play-state:paused;opacity:0}
+/* instrument gauge (table saturation) — track + notches + needle */
+.gauge{position:relative;height:5px;width:80px;border-radius:3px;display:inline-block;vertical-align:middle;
+  margin-left:8px;background:var(--surface-3)}
+.gauge .notch{position:absolute;top:-1px;height:7px;width:1px;background:rgba(255,255,255,.16)}
+.gauge>i{position:absolute;left:0;top:0;height:100%;border-radius:3px;background:var(--series-1)}
+.gauge>i.warn{background:var(--warn)}.gauge>i.crit{background:var(--crit)}
+.gauge .needle{position:absolute;top:-1px;height:7px;width:2px;border-radius:1px;background:currentColor;
+  box-shadow:0 0 4px currentColor}
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.01ms !important;animation-iteration-count:1 !important}
+  .signal .sig-pulse{opacity:.5}
+}
 .st-main{min-width:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .st-msg{font-size:13.5px;font-weight:500;color:var(--ink)}
 .st-chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -82,7 +125,7 @@ h3{font-size:13px;font-weight:600;margin:0;letter-spacing:-.01em}
 .st-meta b{color:var(--ink-2);font-weight:600;font-family:var(--mono)}
 
 /* ---------------- cards / grid ---------------- */
-.card{background:var(--surface-1);border:1px solid var(--line);border-radius:10px}
+.card{background:var(--surface-1);border:1px solid var(--line);border-radius:10px;box-shadow:inset 0 1px 0 var(--edge-hi)}
 .grid{display:grid;gap:16px}
 .kpis{grid-template-columns:repeat(4,1fr)}
 .row-2{grid-template-columns:1.7fr 1fr;margin-top:16px}
@@ -90,7 +133,7 @@ h3{font-size:13px;font-weight:600;margin:0;letter-spacing:-.01em}
 @media(max-width:560px){.kpis{grid-template-columns:1fr}}
 
 /* kpi card */
-.kpi{background:var(--surface-1);border:1px solid var(--line);border-radius:10px;padding:15px 16px 10px;display:flex;flex-direction:column}
+.kpi{background:var(--surface-1);border:1px solid var(--line);border-radius:10px;padding:15px 16px 10px;display:flex;flex-direction:column;box-shadow:inset 0 1px 0 var(--edge-hi)}
 .kpi-top{display:flex;align-items:center;gap:7px;margin-bottom:8px}
 .kpi-lbl{font-size:11px;font-weight:600;color:var(--ink-2);letter-spacing:.05em;text-transform:uppercase}
 .kpi-dot{width:7px;height:7px;border-radius:50%}
@@ -243,8 +286,14 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
   <main class="main">
     <div class="pagehead">
       <div class="ph-host cpy" id="host" title="click to copy">—</div>
-      <div class="ph-meta"><span class="updated" id="updated"><span class="lv"></span>connecting…</span></div>
+      <div class="ph-meta"><span class="updated"><span class="lv" id="live-dot"></span><span id="upd-text">connecting…</span></span></div>
     </div>
+
+    <div class="signalwrap"><svg class="signal" id="signal" viewBox="0 0 1200 20" preserveAspectRatio="none" aria-hidden="true">
+      <polyline class="sig-flat" id="sig-flat" points="0,10 1200,10"/>
+      <polyline class="sig-base" id="sig-base" points=""/>
+      <polyline class="sig-pulse" id="sig-pulse" points=""/>
+    </svg></div>
 
     <div class="statusline ok" id="statusline">
       <span class="st-ico">●</span>
@@ -267,7 +316,7 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
           </div>
         </div>
         <canvas id="area" height="200"></canvas>
-        <div class="legend"><span><i style="background:var(--cyan)"></i>CPU %</span><span><i style="background:var(--violet)"></i>Memory %</span></div>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>CPU %</span><span><i style="background:var(--series-2)"></i>Memory %</span></div>
       </div>
       <div class="card events-card">
         <h3>Recent activity</h3>
@@ -340,7 +389,8 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
 
 <script>
 const $=id=>document.getElementById(id), clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
-const HEX={cyan:'#5bd1e6',violet:'#8b7bff',accent:'#6a7bff',ok:'#3fb265',warn:'#e0a032',crit:'#e5484d',idle:'#7d8794'};
+const HEX={series1:'#45B8FF',series2:'#A78BFF',series3:'#6E8BF0',series4:'#4FC3D6',
+  pulse:'#21E0C6',ok:'#33C66E',warn:'#E6A82E',crit:'#F0555A',idle:'#7E8896'};
 const MONO='ui-monospace,monospace';
 function rel(s){if(s<0)s=0;if(s<60)return s+'s';const m=~~(s/60);if(m<60)return m+'m';const h=~~(m/60);if(h<24)return h+'h '+(m%60)+'m';const d=~~(h/24);return d+'d '+(h%24)+'h';}
 function lvl(v,w,c){return v>=c?'crit':v>=w?'warn':'ok';}
@@ -351,14 +401,21 @@ function fmtBps(b){if(b<1000)return Math.round(b)+' B';if(b<1e6)return (b/1e3).t
 const CAP=60, rings={};
 const push=(k,v)=>{(rings[k]??=[]).push(v);if(rings[k].length>CAP)rings[k].shift();};
 
-/* ---------- sparkline (SVG) ---------- */
-function sparkSVG(vals,color,fill=true){
+/* ---------- sparkline (SVG) — one micro-instrument: trace + "now" marker ---------- */
+function sparkSVG(vals,color,fill=true,state){
   if(!vals||vals.length<2)return `<svg class="spark" viewBox="0 0 100 40" preserveAspectRatio="none"></svg>`;
   const n=vals.length,mx=Math.max(...vals),mn=Math.min(...vals),rng=Math.max(1e-6,mx-mn);
-  const X=i=>(i/(n-1))*100, Y=v=>38-((v-mn)/rng)*36;
+  const X=i=>(i/(n-1))*97, Y=v=>38-((v-mn)/rng)*34;
   let pts='';for(let i=0;i<n;i++)pts+=X(i).toFixed(1)+','+Y(vals[i]).toFixed(1)+' ';pts=pts.trim();
-  const area=fill?`<polygon fill="${color}" fill-opacity=".1" points="0,40 ${pts} 100,40"/>`:'';
-  return `<svg class="spark" viewBox="0 0 100 40" preserveAspectRatio="none">${area}<polyline fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke" points="${pts}"/></svg>`;
+  const lx=X(n-1),ly=Y(vals[n-1]);
+  const hot=state==='crit'?HEX.crit:state==='warn'?HEX.warn:null;
+  const area=fill?`<polygon fill="${color}" fill-opacity=".1" points="0,40 ${pts} ${lx.toFixed(1)},40"/>`:'';
+  let tip='';
+  if(hot){let tp='';for(let i=Math.max(0,n-3);i<n;i++)tp+=X(i).toFixed(1)+','+Y(vals[i]).toFixed(1)+' ';
+    tip=`<polyline fill="none" stroke="${hot}" stroke-width="1.75" vector-effect="non-scaling-stroke" points="${tp.trim()}"/>`;}
+  const nc=hot||color;
+  const node=`<line x1="${lx.toFixed(1)}" y1="${(ly-3).toFixed(1)}" x2="${lx.toFixed(1)}" y2="${(ly+3).toFixed(1)}" stroke="${nc}" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round"/>`;
+  return `<svg class="spark" viewBox="0 0 100 40" preserveAspectRatio="none">${area}<polyline fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke" points="${pts}"/>${tip}${node}</svg>`;
 }
 
 /* ---------- KPI cards ---------- */
@@ -367,13 +424,13 @@ function kpi(label,val,unit,sub,state,ring,color){
   return `<div class="kpi">
     <div class="kpi-top"><span class="kpi-lbl">${label}</span>${sc?`<span class="kpi-dot ${sc}"></span>`:''}</div>
     <div class="kpi-val ${sc}">${val}<span class="u">${unit}</span></div>
-    <div class="kpi-sub">${sub}</div>${sparkSVG(ring,color)}</div>`;
+    <div class="kpi-sub">${sub}</div>${sparkSVG(ring,color,true,state)}</div>`;
 }
 function kpiNet(h,ring){
   return `<div class="kpi">
     <div class="kpi-top"><span class="kpi-lbl">Network</span></div>
     <div class="kpi-val net">↓${fmtBps(h.net_rx_bps||0)} <span class="tx">↑${fmtBps(h.net_tx_bps||0)}</span></div>
-    <div class="kpi-sub">rx / tx per second</div>${sparkSVG(ring,HEX.cyan)}</div>`;
+    <div class="kpi-sub">rx / tx per second</div>${sparkSVG(ring,HEX.series4)}</div>`;
 }
 
 /* ---------- area chart (host cpu+mem, LIVE or fetched range) ---------- */
@@ -382,19 +439,36 @@ function drawArea(){
   const cv=$('area'),w=cv.clientWidth||700,h=200,dpr=Math.min(devicePixelRatio||1,2);
   if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr;}
   const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
-  const pad={l:30,r:10,t:12,b:22};
-  g.strokeStyle='rgba(255,255,255,.05)';g.fillStyle=HEX.idle;g.font='10px '+MONO;g.textAlign='right';g.textBaseline='middle';
-  for(let i=0;i<=5;i++){const y=pad.t+(h-pad.t-pad.b)*i/5;g.beginPath();g.moveTo(pad.l,y);g.lineTo(w-pad.r,y);g.stroke();g.fillText(100-i*20,pad.l-6,y);}
-  const series=[[chart.cpu,HEX.cyan,[]],[chart.mem,HEX.violet,[5,4]]];
+  const pad={l:30,r:20,t:14,b:22};
+  g.lineCap='round';g.lineJoin='round';
+  // graph-paper grid: solid baseline, dashed 25/50/75, labels 0/50/100
+  g.fillStyle=HEX.idle;g.font='10px '+MONO;g.textAlign='right';g.textBaseline='middle';
+  for(let i=0;i<=4;i++){const val=100-i*25,y=pad.t+(h-pad.t-pad.b)*i/4;
+    g.setLineDash(i===4?[]:[1,3]);g.strokeStyle=i===4?'rgba(255,255,255,.10)':'rgba(255,255,255,.05)';
+    g.beginPath();g.moveTo(pad.l,y);g.lineTo(w-pad.r,y);g.stroke();
+    if(val%50===0)g.fillText(val,pad.l-6,y);}
+  g.setLineDash([]);
+  const series=[[chart.cpu,HEX.series1],[chart.mem,HEX.series2]];
   const dim=v=>({n:v.length,x:i=>pad.l+(i/(v.length-1))*(w-pad.l-pad.r),y:val=>pad.t+(1-clamp(val,0,100)/100)*(h-pad.t-pad.b)});
-  g.shadowBlur=0;
+  const live=chart.mode==='LIVE';
+  // the "now" line (live only)
+  if(live&&((chart.cpu&&chart.cpu.length>1)||(chart.mem&&chart.mem.length>1))){
+    g.strokeStyle='rgba(255,255,255,.09)';g.beginPath();g.moveTo(w-pad.r,pad.t);g.lineTo(w-pad.r,h-pad.b);g.stroke();}
+  // area fills
   for(const [v,c] of series){if(!v||v.length<2)continue;const {n,x,y}=dim(v);
     g.beginPath();g.moveTo(x(0),h-pad.b);for(let i=0;i<n;i++)g.lineTo(x(i),y(v[i]));g.lineTo(x(n-1),h-pad.b);g.closePath();
-    const gr=g.createLinearGradient(0,pad.t,0,h-pad.b);gr.addColorStop(0,c+'26');gr.addColorStop(1,c+'00');g.fillStyle=gr;g.fill();}
-  for(const [v,c,dash] of series){if(!v||v.length<2)continue;const {n,x,y}=dim(v);
-    g.setLineDash(dash);g.beginPath();g.moveTo(x(0),y(v[0]));for(let i=1;i<n;i++)g.lineTo(x(i),y(v[i]));
-    g.strokeStyle=c;g.lineWidth=2;g.stroke();}
-  g.setLineDash([]);
+    const gr=g.createLinearGradient(0,pad.t,0,h-pad.b);gr.addColorStop(0,c+'2e');gr.addColorStop(1,c+'00');g.fillStyle=gr;g.fill();}
+  // traces with horizontal tail-fade (signal flows in from the left)
+  for(let s=0;s<series.length;s++){const [v,c]=series[s];if(!v||v.length<2)continue;const {n,x,y}=dim(v);
+    const gx=g.createLinearGradient(pad.l,0,w-pad.r,0);gx.addColorStop(0,c+'00');gx.addColorStop(.14,c);gx.addColorStop(1,c);
+    g.strokeStyle=gx;g.lineWidth=s===0?2:1.75;
+    g.beginPath();g.moveTo(x(0),y(v[0]));for(let i=1;i<n;i++)g.lineTo(x(i),y(v[i]));g.stroke();}
+  // terminal pulse beads on the now-line (LIVE only — the signature node)
+  if(live)for(const [v,c] of series){if(!v||v.length<2)continue;const {n,x,y}=dim(v);const px=x(n-1),py=y(v[n-1]);
+    const hg=g.createRadialGradient(px,py,0,px,py,11);hg.addColorStop(0,c+'66');hg.addColorStop(1,c+'00');
+    g.fillStyle=hg;g.beginPath();g.arc(px,py,11,0,7);g.fill();
+    g.strokeStyle=c+'cc';g.lineWidth=1.5;g.beginPath();g.arc(px,py,4.5,0,7);g.stroke();
+    g.fillStyle=c;g.beginPath();g.arc(px,py,3,0,7);g.fill();}
   if(chart.t&&chart.t.length>1){g.fillStyle=HEX.idle;g.textAlign='center';const n=chart.t.length;
     for(let k=0;k<=4;k++){const i=Math.round((n-1)*k/4),xx=pad.l+(i/(n-1))*(w-pad.l-pad.r),dt=new Date(chart.t[i]*1000);
       const lbl=chart.mode==='7D'?(dt.getMonth()+1)+'/'+dt.getDate():String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');
@@ -453,9 +527,9 @@ function render(d){
   // kpis
   const cpuL=lvl(h.cpu_pct,75,90),memL=lvl(h.mem_used_pct,80,92),diskL=lvl(h.disk_used_pct,80,90);
   $('kpis').innerHTML=
-    kpi('CPU',h.cpu_pct.toFixed(1),'%',`load ${h.load1.toFixed(2)} · ${h.load5.toFixed(2)} · ${h.load15.toFixed(2)}`,cpuL,rings['host.cpu'],HEX.cyan)+
-    kpi('Memory',h.mem_used_pct.toFixed(0),'%',`${fmtMem(h.mem_total_mb-h.mem_avail_mb)} of ${fmtMem(h.mem_total_mb)}`,memL,rings['host.mem'],HEX.cyan)+
-    kpi('Disk',h.disk_used_pct.toFixed(0),'%',`${h.disk_avail_gb.toFixed(0)}G free of ${h.disk_total_gb.toFixed(0)}G`,diskL,rings['host.disk'],HEX.cyan)+
+    kpi('CPU',h.cpu_pct.toFixed(1),'%',`load ${h.load1.toFixed(2)} · ${h.load5.toFixed(2)} · ${h.load15.toFixed(2)}`,cpuL,rings['host.cpu'],HEX.series1)+
+    kpi('Memory',h.mem_used_pct.toFixed(0),'%',`${fmtMem(h.mem_total_mb-h.mem_avail_mb)} of ${fmtMem(h.mem_total_mb)}`,memL,rings['host.mem'],HEX.series2)+
+    kpi('Disk',h.disk_used_pct.toFixed(0),'%',`${h.disk_avail_gb.toFixed(0)}G free of ${h.disk_total_gb.toFixed(0)}G`,diskL,rings['host.disk'],HEX.series3)+
     kpiNet(h,rings['host.net']);
   // trend live
   if(chart.mode==='LIVE'){chart.cpu=rings['host.cpu'];chart.mem=rings['host.mem'];chart.t=null;drawArea();}
@@ -463,6 +537,7 @@ function render(d){
   let crit=0,warn=0;for(const v of [cpuL,memL,diskL]){if(v==='crit')crit++;else if(v==='warn')warn++;}
   for(const c of cs){const s=sev(c);if(s==='crit')crit++;else if(s==='warn')warn++;}
   const worst=crit?'crit':warn?'warn':'ok';
+  setBeatState(worst);
   // status line
   const sl=$('statusline');sl.className='statusline '+worst;
   sl.querySelector('.st-ico').textContent=worst==='crit'?'▲':worst==='warn'?'◆':'●';
@@ -481,8 +556,10 @@ function render(d){
     const mem=c.mem_mb!=null?fmtMem(c.mem_mb):'—';
     const memPct=c.mem_mb!=null&&c.mem_limit_mb?clamp(c.mem_mb/c.mem_limit_mb*100,0,100):null;
     const mc=memPct!=null?lvl(memPct,75,90):'';
+    const gcol=mc==='crit'?'var(--crit)':mc==='warn'?'var(--warn)':'var(--series-1)';
+    const gauge=memPct!=null?`<span class="gauge" style="color:${gcol}"><i class="${mc}" style="width:${memPct}%"></i><span class="notch" style="left:75%"></span><span class="notch" style="left:90%"></span><span class="needle" style="left:calc(${memPct.toFixed(0)}% - 1px)"></span></span>`:'';
     const cpu=c.cpu_pct!=null?c.cpu_pct.toFixed(1)+'%':'<span class="dim">—</span>';
-    const spk=c.cpu_pct!=null?`<span class="td-spk">${sparkSVG(rings['c.'+c.name+'.cpu'],HEX.cyan,false)}</span>`:'';
+    const spk=c.cpu_pct!=null?`<span class="td-spk">${sparkSVG(rings['c.'+c.name+'.cpu'],HEX.series1,false)}</span>`:'';
     let rst='<span class="rst dim">0</span>';
     if(c.restarts>0){const t=lastRestart[c.name];rst=`<span class="rst hot">↻ ${c.restarts}</span>`+(t?` <span class="dim">· ${rel(nowS-t)}</span>`:'');}
     return `<tr class="clk ${s==='crit'?'crit':''}" data-c="${c.name}">
@@ -491,7 +568,7 @@ function render(d){
       <td>${c.health?`<span class="pill ${c.health==='healthy'?'ok':c.health==='unhealthy'?'crit':'warn'}">${c.health}</span>`:'<span class="dim">—</span>'}</td>
       <td class="r">${cpu}</td>
       <td>${spk}</td>
-      <td>${mem}${memPct!=null?`<span class="bar"><i class="${mc}" style="width:${memPct}%"></i></span>`:''}</td>
+      <td>${mem}${gauge}</td>
       <td class="r">${rst}</td></tr>`;}).join('');
   if(dw.name)renderDrawer();
   document.title=(worst==='crit'?'▲ ':worst==='warn'?'◆ ':'')+'vitals · '+h.hostname;
@@ -531,7 +608,7 @@ async function loadDrawerCharts(){
   const to=Math.floor(Date.now()/1000),from=to-DR_SPANS[dw.range];
   const q=m=>`/api/series?metric=c.${encodeURIComponent(name)}.${m}&from=${from}&to=${to}`;
   try{const [cpu,mem]=await Promise.all([fetch(q('cpu')).then(r=>r.json()),fetch(q('mem')).then(r=>r.json())]);
-    if(dw.name!==name)return;miniChart($('dw-cpu'),cpu.avg,HEX.cyan);miniChart($('dw-mem'),mem.avg,HEX.violet);
+    if(dw.name!==name)return;miniChart($('dw-cpu'),cpu.avg,HEX.series1);miniChart($('dw-mem'),mem.avg,HEX.series2);
   }catch(e){}
 }
 function showPane(p){
@@ -674,17 +751,40 @@ function applyDeepLink(){const m=location.hash.match(/^#c\/(.+)$/);if(m)openDraw
 addEventListener('hashchange',()=>{const m=location.hash.match(/^#c\/(.+)$/);
   if(m&&decodeURIComponent(m[1])!==dw.name)openDrawer(decodeURIComponent(m[1]));else if(!m&&dw.name)closeDrawer();});
 
+/* ---------- the heartbeat + signal line ---------- */
+let worstState='ok';
+function setBeatState(worst){
+  worstState=worst;
+  const P=worst==='crit'?820:worst==='warn'?1400:2000;
+  const C=worst==='crit'?'var(--crit)':worst==='warn'?'var(--warn)':'var(--ok)';
+  document.body.style.setProperty('--pulse-period',P+'ms');
+  document.body.style.setProperty('--beat-color',C);
+}
+function beat(){
+  const d=$('live-dot');if(d){d.classList.remove('beat');void d.offsetWidth;d.classList.add('beat');}
+  const ic=document.querySelector('.st-ico');
+  if(ic&&worstState!=='crit'){ic.classList.remove('beat');void ic.offsetWidth;ic.classList.add('beat');}
+}
+(function buildSignal(){
+  const W=1200,mid=10,beat=160,p=[[0,mid]];
+  for(let x=0;x<W;x+=beat){const b=x+beat*0.5;
+    p.push([b-11,mid],[b-6,mid-6],[b-2,mid+7],[b+2,mid-2],[b+6,mid],[x+beat,mid]);}
+  p.push([W,mid]);
+  const s=p.map(q=>q[0].toFixed(0)+','+q[1]).join(' ');
+  $('sig-base').setAttribute('points',s);$('sig-pulse').setAttribute('points',s);
+})();
+
 /* ---------- live loop ---------- */
 const CAD=2000,STALE=6000;let lastOk=0,backoff=CAD;
 async function poll(){const ac=new AbortController();const t=setTimeout(()=>ac.abort(),CAD);
   try{const r=await fetch('/api/status',{signal:ac.signal});if(r.status===401){location.href='/';return;}
-    const d=await r.json();if(d)render(d);lastOk=Date.now();backoff=CAD;document.body.classList.remove('stale');
+    const d=await r.json();if(d){render(d);beat();}lastOk=Date.now();backoff=CAD;document.body.classList.remove('stale');
     if(d&&!deepDone){deepDone=true;applyDeepLink();}}
   catch(e){backoff=Math.min(backoff*1.6,20000);if(Date.now()-lastOk>STALE)document.body.classList.add('stale');}
   finally{clearTimeout(t);setTimeout(poll,backoff);}}
-setInterval(()=>{const u=$('updated');if(!lastOk){u.innerHTML='<span class="lv"></span>connecting…';return;}
+setInterval(()=>{const u=$('upd-text');if(!u)return;if(!lastOk){u.textContent='connecting…';return;}
   const s=~~((Date.now()-lastOk)/1000),st=document.body.classList.contains('stale');
-  u.innerHTML='<span class="lv"></span>'+(st?'reconnecting · ':'updated ')+rel(s)+(st?'':' ago');},1000);
+  u.textContent=st?('signal lost · '+rel(s)):('updated '+rel(s)+' ago');},1000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
 addEventListener('resize',()=>{drawArea();if(dw.name&&$('pane-over').classList.contains('on'))loadDrawerCharts();});
 loadEvents();setInterval(loadEvents,5000);
