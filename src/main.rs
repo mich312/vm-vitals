@@ -7,6 +7,7 @@
 mod auth;
 mod collect;
 mod config;
+mod mcp;
 mod store;
 mod web;
 
@@ -30,18 +31,23 @@ async fn main() -> anyhow::Result<()> {
     // Time-series history store (SQLite, tiered rollups).
     let store = Arc::new(store::Store::open(&format!("{}/vitals.db", cfg.data_dir))?);
 
+    // Shared Docker handle (cheap to clone — wraps an Arc). Used by the
+    // collector loop and by the live-log SSE stream in the web layer.
+    let docker = match bollard::Docker::connect_with_unix_defaults() {
+        Ok(d) => Some(d),
+        Err(e) => {
+            tracing::warn!("no docker socket ({e}); host metrics only");
+            None
+        }
+    };
+
     // Collector loop.
     let coll = snapshot.clone();
     let store_w = store.clone();
     let tick = cfg.interval;
+    let docker_loop = docker.clone();
     tokio::spawn(async move {
-        let docker = match bollard::Docker::connect_with_unix_defaults() {
-            Ok(d) => Some(d),
-            Err(e) => {
-                tracing::warn!("no docker socket ({e}); host metrics only");
-                None
-            }
-        };
+        let docker = docker_loop;
         let mut host = collect::host::HostCollector::new();
         let mut iv = interval(tick);
         loop {
@@ -110,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
         token: cfg.web_token.clone(),
         auth,
         store,
+        docker,
     };
     let listener = tokio::net::TcpListener::bind(cfg.web_bind).await?;
     tracing::info!(

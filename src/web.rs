@@ -5,14 +5,20 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, Request, State},
+    extract::{Path, Query, Request, State},
     http::{header, StatusCode},
     middleware::{from_fn_with_state, Next},
-    response::Response,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Response,
+    },
     routing::{get, post},
     Json, Router,
 };
+use bollard::container::{LogOutput, LogsOptions};
+use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
+use std::convert::Infallible;
 use tokio::sync::RwLock;
 
 use crate::auth::{self, AuthState};
@@ -31,13 +37,17 @@ pub struct AppState {
     pub auth: Option<AuthState>,
     /// Time-series history store.
     pub store: Arc<Store>,
+    /// Docker handle for the live-log SSE stream. None = no socket.
+    pub docker: Option<bollard::Docker>,
 }
 
 pub fn router(state: AppState) -> Router {
-    // /api/* : bearer token OR a valid dashboard session.
+    // /api/* + /mcp : bearer token OR a valid dashboard session.
     let api = Router::new()
         .route("/api/status", get(status))
         .route("/api/series", get(series))
+        .route("/api/logs/:name", get(logs))
+        .route("/mcp", post(crate::mcp::handle))
         .route_layer(from_fn_with_state(state.clone(), require_api_auth));
 
     Router::new()
@@ -69,6 +79,57 @@ async fn series(State(state): State<AppState>, Query(q): Query<SeriesQuery>) -> 
     let res = q.res.unwrap_or_else(|| crate::store::pick_res(q.to - q.from));
     let s = state.store.series(&q.metric, q.from, q.to, res);
     Json(serde_json::json!({ "res": res, "t": s.t, "avg": s.avg, "min": s.min, "max": s.max }))
+}
+
+/// Live container logs as Server-Sent Events. The browser's `EventSource`
+/// can't set an Authorization header, so this rides the dashboard session
+/// cookie (accepted by `require_api_auth`). Each event's data is
+/// `{"s":"out"|"err","m":"<line>"}`.
+async fn logs(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let docker = state.docker.clone();
+    let stream = async_stream::stream! {
+        let Some(d) = docker else {
+            yield Ok(Event::default().event("fatal").data("docker socket unavailable"));
+            return;
+        };
+        let opts = LogsOptions::<String> {
+            follow: true,
+            stdout: true,
+            stderr: true,
+            tail: "300".to_string(),
+            ..Default::default()
+        };
+        let mut logs = d.logs(&name, Some(opts));
+        while let Some(item) = logs.next().await {
+            match item {
+                Ok(out) => {
+                    let (s, bytes) = match out {
+                        LogOutput::StdErr { message } => ("err", message),
+                        LogOutput::StdOut { message }
+                        | LogOutput::Console { message }
+                        | LogOutput::StdIn { message } => ("out", message),
+                    };
+                    let text = String::from_utf8_lossy(&bytes);
+                    for line in text.split_inclusive('\n') {
+                        let line = line.trim_end_matches(['\n', '\r']);
+                        if line.is_empty() {
+                            continue;
+                        }
+                        let data = serde_json::json!({ "s": s, "m": line }).to_string();
+                        yield Ok(Event::default().data(data));
+                    }
+                }
+                Err(e) => {
+                    yield Ok(Event::default().event("fatal").data(e.to_string()));
+                    break;
+                }
+            }
+        }
+    };
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn require_api_auth(

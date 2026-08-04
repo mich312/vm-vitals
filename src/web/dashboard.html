@@ -150,6 +150,83 @@ tbody tr:last-child td{border-bottom:0}
 .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blue));border-radius:4px}
 .rst{font-family:var(--mono)}.rst.hot{color:var(--amber)}
 .dim{color:var(--ink3)}
+tbody tr.clk{cursor:pointer}
+tbody tr.clk:hover td{background:rgba(255,255,255,.035)}
+td .go{color:var(--ink3);opacity:0;transition:opacity .15s}
+tbody tr.clk:hover .go{opacity:1}
+
+/* ---------------- drawer ---------------- */
+.scrim{position:fixed;inset:0;background:rgba(3,6,22,.62);backdrop-filter:blur(2px);opacity:0;pointer-events:none;
+  transition:opacity .25s;z-index:40}
+.scrim.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;height:100vh;width:min(580px,95vw);z-index:50;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,#0a1136,#070b26);border-left:1px solid var(--card-line);
+  box-shadow:-30px 0 80px rgba(2,5,20,.6);transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1)}
+.drawer.open{transform:none}
+.dw-head{padding:20px 22px 14px;border-bottom:1px solid var(--card-line)}
+.dw-head .row{display:flex;align-items:flex-start;gap:12px}
+.dw-title{font-size:17px;font-weight:700}
+.dw-sub{color:var(--ink3);font-family:var(--mono);font-size:11px;margin-top:3px;word-break:break-all}
+.dw-x{margin-left:auto;width:32px;height:32px;border-radius:10px;display:grid;place-items:center;flex:none;
+  background:rgba(255,255,255,.05);border:1px solid var(--card-line);cursor:pointer;color:var(--ink2)}
+.dw-x:hover{color:#fff}
+.dw-tabs{display:flex;gap:4px;margin-top:14px}
+.dw-tab{font:700 12px var(--font);color:var(--ink2);background:transparent;border:0;padding:8px 14px;border-radius:10px;cursor:pointer}
+.dw-tab.on{background:var(--card);border:1px solid var(--card-line);color:#fff}
+.dw-body{flex:1;overflow:auto;padding:18px 22px}
+.dw-pane{display:none}.dw-pane.on{display:block}
+.metricbox{margin-bottom:16px}
+.metricbox .mh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.metricbox .mh .mn{font-size:12px;color:var(--ink2);font-weight:600}
+.metricbox .mh .mv{font-size:16px;font-weight:700}
+.metricbox canvas{width:100%;display:block}
+.metatable{width:100%;font-size:13px;border-collapse:collapse}
+.metatable td{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.metatable tr:last-child td{border-bottom:0}
+.metatable td:first-child{color:var(--ink2);width:38%}
+.metatable td:last-child{text-align:right;font-family:var(--mono);font-size:12px;word-break:break-all}
+
+/* logs */
+.logbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.logbar input{flex:1;min-width:0;background:rgba(255,255,255,.04);border:1px solid var(--card-line);color:#fff;
+  border-radius:9px;padding:7px 10px;font:12px var(--mono)}
+.logbar input:focus{outline:none;border-color:var(--blue)}
+.logbtn{font:700 11px var(--font);padding:7px 10px;border-radius:9px;border:1px solid var(--card-line);
+  background:rgba(255,255,255,.04);color:var(--ink2);cursor:pointer;flex:none}
+.logbtn:hover{color:#fff}
+.logbtn.on{background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff;border-color:transparent}
+.logview{font:11.5px/1.55 var(--mono);background:rgba(0,0,0,.35);border:1px solid var(--card-line);border-radius:12px;
+  padding:12px 14px;height:54vh;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.logview .ln{display:block}
+.logview .ln.err{color:var(--red)}
+.logview .ln.warn{color:var(--amber)}
+.logstat{font-size:11px;color:var(--ink3);margin-top:8px;display:flex;align-items:center;gap:7px}
+.logstat .lv{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.logstat.paused .lv{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.logstat.dead .lv{background:var(--red);box-shadow:0 0 8px var(--red)}
+
+/* command palette */
+.pal{position:fixed;inset:0;z-index:60;display:none;align-items:flex-start;justify-content:center;
+  background:rgba(3,6,22,.55);backdrop-filter:blur(3px);padding-top:13vh}
+.pal.open{display:flex}
+.palbox{width:min(560px,92vw);background:linear-gradient(180deg,#0b1338,#080d29);border:1px solid var(--card-line);
+  border-radius:16px;box-shadow:0 30px 90px rgba(2,5,20,.7);overflow:hidden}
+.palbox input{width:100%;background:transparent;border:0;border-bottom:1px solid var(--card-line);color:#fff;
+  font:15px var(--font);padding:16px 18px}
+.palbox input:focus{outline:none}
+.pallist{max-height:52vh;overflow:auto;padding:6px}
+.palitem{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;cursor:pointer;font-size:13.5px}
+.palitem .pd{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor;flex:none}
+.palitem .k{margin-left:auto;font:10px var(--mono);color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
+.palitem.sel{background:var(--card)}
+
+/* copy affordance + toast */
+.cpy{cursor:pointer}
+.cpy:hover{text-decoration:underline dotted;text-underline-offset:3px}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:var(--card);border:1px solid var(--card-line);color:#fff;padding:10px 16px;border-radius:12px;
+  font-size:13px;z-index:70;transition:all .25s;pointer-events:none;box-shadow:0 12px 40px rgba(3,7,30,.5)}
+.toast.show{opacity:1;transform:translateX(-50%)}
 </style>
 </head>
 <body>
@@ -232,6 +309,57 @@ tbody tr:last-child td{border-bottom:0}
     </div>
   </main>
 </div>
+
+<!-- container detail drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dw-head">
+    <div class="row">
+      <div style="min-width:0">
+        <div class="dw-title" id="dw-name">—</div>
+        <div class="dw-sub cpy" id="dw-img" title="click to copy"></div>
+      </div>
+      <div class="dw-x" id="dw-x">✕</div>
+    </div>
+    <div class="dw-tabs">
+      <button class="dw-tab on" data-p="over">Overview</button>
+      <button class="dw-tab" data-p="logs">Logs</button>
+      <button class="dw-tab" data-p="meta">Meta</button>
+    </div>
+  </div>
+  <div class="dw-body">
+    <div class="dw-pane on" id="pane-over">
+      <div class="rtabs" id="dw-ranges" style="width:max-content;margin-bottom:16px">
+        <button class="rtab on" data-dr="1H">1H</button><button class="rtab" data-dr="6H">6H</button>
+        <button class="rtab" data-dr="24H">24H</button><button class="rtab" data-dr="7D">7D</button>
+      </div>
+      <div class="metricbox"><div class="mh"><span class="mn">CPU %</span><span class="mv" id="dm-cpu">—</span></div><canvas id="dw-cpu" height="92"></canvas></div>
+      <div class="metricbox"><div class="mh"><span class="mn">Memory</span><span class="mv" id="dm-mem">—</span></div><canvas id="dw-mem" height="92"></canvas></div>
+    </div>
+    <div class="dw-pane" id="pane-logs">
+      <div class="logbar">
+        <input id="log-filter" placeholder="filter lines…" autocomplete="off" spellcheck="false">
+        <button class="logbtn on" id="log-follow">Follow</button>
+        <button class="logbtn on" id="log-wrap">Wrap</button>
+        <button class="logbtn" id="log-clear">Clear</button>
+      </div>
+      <div class="logview" id="logview"></div>
+      <div class="logstat" id="logstat"><span class="lv"></span><span id="logstat-t">connecting…</span></div>
+    </div>
+    <div class="dw-pane" id="pane-meta">
+      <table class="metatable" id="dw-meta"></table>
+    </div>
+  </div>
+</aside>
+
+<!-- ⌘K command palette -->
+<div class="pal" id="pal">
+  <div class="palbox">
+    <input id="pal-in" placeholder="Jump to a container, or type a command…" autocomplete="off" spellcheck="false">
+    <div class="pallist" id="pal-list"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
 
 <script>
 const $=id=>document.getElementById(id), clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -345,7 +473,9 @@ function sev(c){const h=(c.health||'').toLowerCase();
 const RANK={crit:0,warn:1,idle:2,ok:3};
 
 /* ---------- render ---------- */
+let last=null;
 function render(d){
+  last=d;
   const h=d.host, cs=d.containers;
   $('host').textContent=h.hostname;
   const cpuL=lvl(h.cpu_pct,75,90),memL=lvl(h.mem_used_pct,80,92),diskL=lvl(h.disk_used_pct,80,90);
@@ -385,30 +515,176 @@ function render(d){
     const memPct=c.mem_mb!=null&&c.mem_limit_mb?clamp(c.mem_mb/c.mem_limit_mb*100,0,100):null;
     const cpu=c.cpu_pct!=null?c.cpu_pct.toFixed(1)+'%':'<span class="dim">—</span>';
     const rc=c.restarts>0?`<span class="rst hot">↻ ${c.restarts}</span>`:'<span class="rst dim">0</span>';
-    return `<tr><td><div class="cname">${c.name}</div><div class="cimg">${c.image}</div></td>
+    return `<tr class="clk" data-c="${c.name}"><td><div class="cname">${c.name}</div><div class="cimg">${c.image}</div></td>
       <td><span class="pill ${p}"><span class="dot"></span>${c.state}</span></td>
       <td>${c.health?`<span class="pill ${c.health==='healthy'?'ok':c.health==='unhealthy'?'crit':'warn'}">${c.health}</span>`:'<span class="dim">—</span>'}</td>
       <td class="r">${cpu}</td>
       <td>${mem}${memPct!=null?`<span class="bar"><i style="width:${memPct}%"></i></span>`:''}</td>
-      <td class="r">${rc}</td></tr>`;}).join('');
+      <td class="r">${rc} <span class="go">→</span></td></tr>`;}).join('');
+  if(dw.name)renderDrawer();
+  document.title=(worst==='crit'?'▲ ':worst==='warn'?'● ':'')+'vitals · '+h.hostname;
 }
 
 /* ---------- gauges init ---------- */
 $('g-cpu').innerHTML=gaugeSVG('g-cpu',['#21d4fd','#2152ff']);
 $('g-mem').innerHTML=gaugeSVG('g-mem',['#582cff','#0075ff']);
 
+/* ---------- container drawer ---------- */
+const DR_SPANS={'1H':3600,'6H':21600,'24H':86400,'7D':604800};
+const dw={name:null,range:'1H',es:null,follow:true,wrap:true,lines:[],filter:''};
+const fmtMem=mb=>mb>=1000?(mb/1000).toFixed(2)+' GB':Math.round(mb)+' MB';
+const curC=()=>((last&&last.containers)||[]).find(c=>c.name===dw.name);
+
+function miniChart(cv,vals,col){
+  const w=cv.clientWidth||480,h=92,dpr=Math.min(devicePixelRatio||1,2);
+  if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+  const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
+  const pad={l:4,r:4,t:8,b:6};
+  if(!vals||vals.length<2){g.fillStyle='#7079a3';g.font='11px sans-serif';g.textAlign='center';g.fillText('collecting history…',w/2,h/2);return;}
+  const n=vals.length,mx=Math.max(...vals),mn=Math.min(...vals),rng=Math.max(1e-6,mx-mn);
+  const x=i=>pad.l+(i/(n-1))*(w-pad.l-pad.r),y=v=>pad.t+(1-(v-mn)/rng)*(h-pad.t-pad.b);
+  const c=getComputedStyle(document.documentElement).getPropertyValue(col).trim();
+  g.beginPath();g.moveTo(x(0),h-pad.b);for(let i=0;i<n;i++)g.lineTo(x(i),y(vals[i]));g.lineTo(x(n-1),h-pad.b);g.closePath();
+  const grd=g.createLinearGradient(0,pad.t,0,h-pad.b);grd.addColorStop(0,c+'55');grd.addColorStop(1,c+'00');g.fillStyle=grd;g.fill();
+  g.beginPath();g.moveTo(x(0),y(vals[0]));for(let i=1;i<n;i++)g.lineTo(x(i),y(vals[i]));g.strokeStyle=c;g.lineWidth=2;
+  g.shadowColor=c;g.shadowBlur=8;g.stroke();g.shadowBlur=0;
+}
+function renderDrawer(){
+  const c=curC();if(!c)return;
+  $('dw-name').textContent=c.name;$('dw-img').textContent=c.image;
+  $('dm-cpu').textContent=c.cpu_pct!=null?c.cpu_pct.toFixed(1)+'%':'—';
+  $('dm-mem').textContent=c.mem_mb!=null?fmtMem(c.mem_mb):'—';
+  $('dw-meta').innerHTML=[
+    ['State',c.state],['Health',c.health||'—'],['Restarts',c.restarts],
+    ['CPU',c.cpu_pct!=null?c.cpu_pct.toFixed(1)+'%':'—'],
+    ['Memory',c.mem_mb!=null?fmtMem(c.mem_mb):'—'],
+    ['Mem limit',c.mem_limit_mb?fmtMem(c.mem_limit_mb):'—'],
+    ['Status',c.status],['Image',c.image]
+  ].map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+async function loadDrawerCharts(){
+  const name=dw.name;if(!name)return;
+  const to=Math.floor(Date.now()/1000),from=to-DR_SPANS[dw.range];
+  const q=m=>`/api/series?metric=c.${encodeURIComponent(name)}.${m}&from=${from}&to=${to}`;
+  try{
+    const [cpu,mem]=await Promise.all([fetch(q('cpu')).then(r=>r.json()),fetch(q('mem')).then(r=>r.json())]);
+    if(dw.name!==name)return;
+    miniChart($('dw-cpu'),cpu.avg,'--cyan');miniChart($('dw-mem'),mem.avg,'--blue');
+  }catch(e){}
+}
+function showPane(p){
+  document.querySelectorAll('.dw-tab').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  document.querySelectorAll('.dw-pane').forEach(el=>el.classList.toggle('on',el.id==='pane-'+p));
+  if(p==='logs')startLogs();else stopLogs();
+  if(p==='over')loadDrawerCharts();
+}
+function openDrawer(name){
+  dw.name=name;
+  if(location.hash!=='#c/'+encodeURIComponent(name))history.replaceState(null,'','#c/'+encodeURIComponent(name));
+  $('scrim').classList.add('open');$('drawer').classList.add('open');$('drawer').setAttribute('aria-hidden','false');
+  renderDrawer();showPane('over');
+  $('dw-ranges').querySelectorAll('.rtab').forEach(x=>x.classList.toggle('on',x.dataset.dr===dw.range));
+}
+function closeDrawer(){
+  stopLogs();dw.name=null;
+  $('scrim').classList.remove('open');$('drawer').classList.remove('open');$('drawer').setAttribute('aria-hidden','true');
+  if(location.hash.startsWith('#c/'))history.replaceState(null,'','#');
+}
+document.querySelectorAll('.dw-tab').forEach(b=>b.onclick=()=>showPane(b.dataset.p));
+$('dw-x').onclick=closeDrawer;$('scrim').onclick=closeDrawer;
+$('dw-ranges').querySelectorAll('.rtab').forEach(b=>b.onclick=()=>{
+  dw.range=b.dataset.dr;$('dw-ranges').querySelectorAll('.rtab').forEach(x=>x.classList.toggle('on',x===b));loadDrawerCharts();});
+$('rows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-c]');if(tr)openDrawer(tr.dataset.c);});
+
+/* ---------- live logs (SSE) ---------- */
+const LOGCAP=800;
+function setLogStat(t,cls){$('logstat-t').textContent=t;const s=$('logstat');s.classList.remove('paused','dead');if(cls)s.classList.add(cls);}
+function logLevel(s,m){return /\b(error|err|fatal|panic|fail)\b/i.test(m)?'err':/\b(warn|warning)\b/i.test(m)?'warn':(s==='err'?'err':'');}
+function appendLine(s,m){
+  const f=dw.filter;if(f&&!m.toLowerCase().includes(f))return;
+  const box=$('logview'),el=document.createElement('span');
+  el.className='ln '+logLevel(s,m);el.textContent=m;box.appendChild(el);
+  while(box.children.length>LOGCAP)box.removeChild(box.firstChild);
+  if(dw.follow)box.scrollTop=box.scrollHeight;
+}
+function reflowLogs(){const box=$('logview');box.innerHTML='';for(const l of dw.lines)appendLine(l.s,l.m);}
+function startLogs(){
+  if(dw.es||!dw.name)return;
+  dw.lines=[];$('logview').innerHTML='';setLogStat('connecting…','paused');
+  const es=new EventSource('/api/logs/'+encodeURIComponent(dw.name));dw.es=es;
+  es.onopen=()=>setLogStat('streaming live');
+  es.onmessage=e=>{try{const o=JSON.parse(e.data);dw.lines.push(o);if(dw.lines.length>LOGCAP)dw.lines.shift();appendLine(o.s,o.m);}catch(_){}};
+  es.addEventListener('fatal',e=>{appendLine('err','— '+e.data+' —');setLogStat('stopped','dead');stopLogs();});
+  es.onerror=()=>setLogStat('reconnecting…','paused');
+}
+function stopLogs(){if(dw.es){dw.es.close();dw.es=null;}}
+$('log-filter').oninput=e=>{dw.filter=e.target.value.toLowerCase();reflowLogs();};
+$('log-follow').onclick=()=>{dw.follow=!dw.follow;$('log-follow').classList.toggle('on',dw.follow);if(dw.follow){const b=$('logview');b.scrollTop=b.scrollHeight;}};
+$('log-wrap').onclick=()=>{dw.wrap=!dw.wrap;$('logview').style.whiteSpace=dw.wrap?'pre-wrap':'pre';$('log-wrap').classList.toggle('on',dw.wrap);};
+$('log-clear').onclick=()=>{dw.lines=[];$('logview').innerHTML='';};
+$('logview').addEventListener('scroll',()=>{const b=$('logview');
+  if(dw.follow&&b.scrollHeight-b.scrollTop-b.clientHeight>40){dw.follow=false;$('log-follow').classList.remove('on');}});
+setInterval(()=>{if(dw.name&&$('pane-over').classList.contains('on'))loadDrawerCharts();},30000);
+
+/* ---------- ⌘K command palette ---------- */
+const pal={open:false,sel:0,items:[]};
+function buildPal(q){
+  q=(q||'').toLowerCase().trim();
+  const cs=((last&&last.containers)||[]).map(c=>({t:c.name,d:c.state,color:sev(c),act:()=>{closePal();openDrawer(c.name);}}));
+  const cmds=[
+    {t:'View host overview',d:'nav',color:'ok',act:()=>{closePal();scrollTo(0,0);}},
+    {t:'Sign out',d:'account',color:'idle',act:()=>location.href='/logout'}
+  ];
+  pal.items=[...cs,...cmds].filter(i=>!q||i.t.toLowerCase().includes(q)||i.d.includes(q));pal.sel=0;
+  const cmap={crit:'var(--red)',warn:'var(--amber)',ok:'var(--green)',idle:'var(--ink3)'};
+  $('pal-list').innerHTML=pal.items.length?pal.items.map((i,ix)=>
+    `<div class="palitem${ix===0?' sel':''}" data-i="${ix}"><span class="pd" style="color:${cmap[i.color]||'var(--ink3)'}"></span>${i.t}<span class="k">${i.d}</span></div>`).join('')
+    :'<div class="palitem dim">no matches</div>';
+}
+function openPal(){pal.open=true;$('pal').classList.add('open');$('pal-in').value='';buildPal('');$('pal-in').focus();}
+function closePal(){pal.open=false;$('pal').classList.remove('open');}
+function palMove(d){if(!pal.items.length)return;pal.sel=(pal.sel+d+pal.items.length)%pal.items.length;
+  const els=$('pal-list').querySelectorAll('.palitem');els.forEach((el,ix)=>el.classList.toggle('sel',ix===pal.sel));
+  els[pal.sel]?.scrollIntoView({block:'nearest'});}
+$('pal-in').oninput=e=>buildPal(e.target.value);
+$('pal-list').addEventListener('click',e=>{const it=e.target.closest('[data-i]');if(it)pal.items[+it.dataset.i]?.act();});
+$('pal').addEventListener('click',e=>{if(e.target===$('pal'))closePal();});
+
+/* ---------- keyboard ---------- */
+addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();pal.open?closePal():openPal();return;}
+  if(e.key==='Escape'){if(pal.open)closePal();else if(dw.name)closeDrawer();return;}
+  if(pal.open){
+    if(e.key==='ArrowDown'){e.preventDefault();palMove(1);}
+    else if(e.key==='ArrowUp'){e.preventDefault();palMove(-1);}
+    else if(e.key==='Enter'){e.preventDefault();pal.items[pal.sel]?.act();}
+  }
+});
+
+/* ---------- click-to-copy + deep link ---------- */
+function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove('show'),1400);}
+function copy(txt){if(!txt)return;(navigator.clipboard?.writeText(txt)||Promise.reject()).then(()=>toast('Copied: '+txt)).catch(()=>toast('Copy failed'));}
+$('host').classList.add('cpy');$('host').title='click to copy';$('host').onclick=()=>copy($('host').textContent);
+$('dw-img').onclick=()=>copy($('dw-img').textContent);
+document.querySelectorAll('.nav').forEach(n=>{if(n.textContent.trim()==='Logs')n.onclick=openPal;});
+let deepDone=false;
+function applyDeepLink(){const m=location.hash.match(/^#c\/(.+)$/);if(m)openDrawer(decodeURIComponent(m[1]));}
+addEventListener('hashchange',()=>{const m=location.hash.match(/^#c\/(.+)$/);
+  if(m&&decodeURIComponent(m[1])!==dw.name)openDrawer(decodeURIComponent(m[1]));else if(!m&&dw.name)closeDrawer();});
+
 /* ---------- live loop ---------- */
 const CAD=2000,STALE=6000; let lastOk=0,backoff=CAD;
 async function poll(){const ac=new AbortController();const t=setTimeout(()=>ac.abort(),CAD);
   try{const r=await fetch('/api/status',{signal:ac.signal});if(r.status===401){location.href='/';return;}
-    const d=await r.json();if(d)render(d);lastOk=Date.now();backoff=CAD;document.body.classList.remove('stale');}
+    const d=await r.json();if(d)render(d);lastOk=Date.now();backoff=CAD;document.body.classList.remove('stale');
+    if(d&&!deepDone){deepDone=true;applyDeepLink();}}
   catch(e){backoff=Math.min(backoff*1.6,20000);if(Date.now()-lastOk>STALE)document.body.classList.add('stale');}
   finally{clearTimeout(t);setTimeout(poll,backoff);}}
 setInterval(()=>{const u=$('updated');if(!lastOk){u.innerHTML='<span class="lv"></span>connecting…';return;}
   const s=~~((Date.now()-lastOk)/1000),st=document.body.classList.contains('stale');
   u.innerHTML='<span class="lv"></span>'+(st?'reconnecting · ':'updated ')+rel(s)+(st?'':' ago');},1000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
-addEventListener('resize',()=>{drawArea();drawBars();});
+addEventListener('resize',()=>{drawArea();drawBars();if(dw.name&&$('pane-over').classList.contains('on'))loadDrawerCharts();});
 poll();
 </script>
 </body>

@@ -1,0 +1,35 @@
+name: deploy
+
+# Build + install vitals on the server whenever main advances (a PR is merged).
+# Can also be run on demand from the Actions tab. The build runs on the server
+# (ci/deploy.sh) — this job just opens an SSH session and streams the script in.
+# Requires repo secrets DEPLOY_SSH_KEY + DEPLOY_HOST.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vitals
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4      # only to get ci/deploy.sh onto the runner
+
+      - name: Deploy over SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "root@${DEPLOY_HOST}" 'bash -s' < ci/deploy.sh
