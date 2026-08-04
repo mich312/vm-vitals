@@ -38,9 +38,9 @@ wedges, vitals is still up and can tell you.
 
 - 📊 Host metrics — CPU, memory, swap, disk, load, uptime
 - 📦 Per-container — state, health, CPU, memory, restarts (catches crash loops)
-- 🌐 Endpoint checks — asserts each URL returns the status *you* expect (so a
-  green deploy that actually serves a 502 still pages you)
-- 🔒 TLS cert expiry warnings
+- 🌐 Endpoint checks — reachability, HTTP status + response time for each public
+  URL (a 5xx or a dead host shows down; a 401 auth wall still counts as up)
+- 🔒 TLS cert expiry — days remaining on each endpoint's certificate
 - 📈 Small built-in time-series store + graphs (no external database)
 - 📜 Live container logs over SSE, in the browser
 - 🔔 Alerting that only fires on real problems — debounced, transition-only,
@@ -90,8 +90,9 @@ channel = "ntfy"                       # or "telegram"
 ntfy = { url = "https://ntfy.sh/your-topic", priority = "high" }
 heartbeat_url = "https://hc-ping.com/…" # dead-man's-switch
 
-[[endpoint]]
-name = "my-app"; url = "https://app.example.com/"; expect = 200
+[[endpoints]]
+name = "my-app"
+url = "https://app.example.com/"
 ```
 
 ## How it compares

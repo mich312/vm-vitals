@@ -7,6 +7,7 @@
 mod auth;
 mod collect;
 mod config;
+mod endpoints;
 mod mcp;
 mod store;
 mod web;
@@ -118,6 +119,16 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Endpoint monitor (reachability + TLS cert expiry), if configured.
+    let ep_status: endpoints::Shared = Arc::new(RwLock::new(Vec::new()));
+    if !cfg.endpoints.is_empty() {
+        let out = ep_status.clone();
+        let eps = cfg.endpoints.clone();
+        let iv = cfg.endpoints_interval;
+        tracing::info!("endpoint monitor: {} endpoints every {:?}", eps.len(), iv);
+        tokio::spawn(async move { endpoints::run(eps, out, iv).await });
+    }
+
     // Dashboard passkey auth, if the relying-party identity is configured.
     let auth = match (&cfg.rp_id, &cfg.rp_origin) {
         (Some(id), Some(origin)) => match auth::AuthState::new(id, origin, &cfg.data_dir) {
@@ -144,6 +155,7 @@ async fn main() -> anyhow::Result<()> {
         store,
         docker,
         events,
+        endpoints: ep_status,
     };
     let listener = tokio::net::TcpListener::bind(cfg.web_bind).await?;
     tracing::info!(

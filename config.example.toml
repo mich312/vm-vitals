@@ -4,6 +4,8 @@
 
 # How often to collect + evaluate.
 interval = "15s"
+# How often to health-check the [[endpoints]] below.
+endpoints_interval = "60s"
 
 [web]
 # Bind to loopback; front it with your TLS proxy (passkeys need HTTPS).
@@ -46,15 +48,15 @@ raw = "48h"                      # 15s samples
 five_min = "30d"
 hour = "180d"
 
-# One block per endpoint to check. `expect` is the status code that means
-# healthy — a mismatch (e.g. a 502, or a 200 where you expected a 302 redirect)
-# fires an alert.
-[[endpoint]]
+# Domains / endpoints to health-check. One [[endpoints]] block per URL — just a
+# name + url. vitals records reachability, HTTP status, response time, and the
+# days remaining on the TLS certificate, and shows them in the Domains panel.
+# "up" means any response below 500 (a 401 auth wall still counts as reachable);
+# 5xx or a connection failure is down. No Caddy/proxy assumptions — list any URL.
+[[endpoints]]
 name = "example"
 url = "https://app.example.com/"
-expect = 200
 
-# [[endpoint]]
+# [[endpoints]]
 # name = "api"
 # url = "https://api.example.com/health"
-# expect = 200

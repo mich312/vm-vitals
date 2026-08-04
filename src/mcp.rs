@@ -93,6 +93,11 @@ fn tool_list() -> Value {
             }
         },
         {
+            "name": "list_endpoints",
+            "description": "Monitored domains/endpoints with up/down, HTTP status, latency, and days until the TLS cert expires.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        },
+        {
             "name": "query_history",
             "description": "Historical time-series for a metric. Metrics: host.cpu, host.mem, host.disk, host.load, host.swap; or c.<container>.cpu / c.<container>.mem for a container.",
             "inputSchema": {
@@ -134,6 +139,13 @@ async fn call_tool(state: &AppState, name: &str, args: &Value) -> Result<String,
             let snap = state.snapshot.read().await.clone();
             let s = snap.ok_or("no snapshot collected yet")?;
             Ok(serde_json::to_string_pretty(&s.containers).unwrap())
+        }
+        "list_endpoints" => {
+            let eps = state.endpoints.read().await.clone();
+            if eps.is_empty() {
+                return Err("no endpoints configured".into());
+            }
+            Ok(serde_json::to_string_pretty(&eps).unwrap())
         }
         "container_logs" => {
             let cname = args

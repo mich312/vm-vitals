@@ -205,6 +205,7 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
 .bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
 .bar i.warn{background:var(--warn)}.bar i.crit{background:var(--crit)}
 .rst{font-family:var(--mono)}.rst.hot{color:var(--warn)}
+.c-crit{color:var(--crit)}.c-warn{color:var(--warn)}
 
 /* ---------------- drawer ---------------- */
 .scrim{position:fixed;inset:0;background:rgba(4,6,9,.6);opacity:0;pointer-events:none;transition:opacity .22s;z-index:40}
@@ -315,6 +316,7 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
     <div class="logo"><span class="mk"><svg width="16" height="16" viewBox="0 0 96 96" fill="none"><path d="M8 52 H32 L42 24 L54 76 L62 56 H73" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="80" cy="56" r="5.5" fill="currentColor"/></svg></span>vitals</div>
     <div class="nav active"><span class="ic">▦</span>Dashboard</div>
     <div class="nav" id="nav-containers"><span class="ic">▤</span>Containers</div>
+    <div class="nav" id="nav-domains" style="display:none"><span class="ic">◍</span>Domains</div>
     <div class="nav" id="nav-logs"><span class="ic">≣</span>Logs</div>
     <div class="nav disabled"><span class="ic">◈</span>Alerts<span class="soon">soon</span></div>
     <div class="sect">Account</div>
@@ -361,6 +363,16 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
       <div class="card events-card">
         <h3>Recent activity</h3>
         <div class="evlist" id="events"><div class="ev-empty">Loading…</div></div>
+      </div>
+    </div>
+
+    <div class="card tablecard domainscard" id="domains-card" style="display:none">
+      <div class="pad"><h3>Domains</h3><span class="cap" id="dom-cap"></span></div>
+      <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Endpoint</th><th>Status</th><th class="r">Code</th><th class="r">Latency</th><th class="r">TLS cert</th></tr></thead>
+        <tbody id="dom-rows"></tbody>
+      </table>
       </div>
     </div>
 
@@ -616,6 +628,27 @@ function renderEvents(evs){
     return `<div class="ev clk" data-c="${e.container}"><span class="ev-i ${cls}">${ico}</span>
       <div class="ev-b"><b>${e.container}</b> <span class="ev-d">${e.detail}</span></div>
       <span class="ev-t">${rel(now-e.ts)}</span></div>`;}).join('');
+}
+
+/* ---------- domains / endpoint monitor ---------- */
+async function loadDomains(){
+  try{const eps=await fetch('/api/endpoints').then(r=>r.json());
+    const card=$('domains-card'),nav=$('nav-domains');
+    if(!eps||!eps.length){card.style.display='none';nav.style.display='none';return;}
+    card.style.display='';nav.style.display='';
+    const up=eps.filter(e=>e.up).length;
+    $('dom-cap').textContent=`${up}/${eps.length} up`;
+    $('dom-rows').innerHTML=eps.map(e=>{
+      const band=e.status===0?'crit':e.status<400?'ok':e.status<500?'warn':'crit';
+      const host=e.url.replace(/^https?:\/\//,'').replace(/\/$/,'');
+      const cert=e.cert_days==null?'<span class="dim">—</span>':
+        (e.cert_days<0?'<span class="c-crit">expired</span>':`<span class="${e.cert_days<7?'c-crit':e.cert_days<21?'c-warn':''}">${e.cert_days}d</span>`);
+      const lat=e.status?e.latency_ms+' ms':'<span class="dim">—</span>';
+      const code=e.status?`<span class="${e.status<400?'':e.status<500?'c-warn':'c-crit'}">${e.status}</span>`:`<span class="c-crit">${e.error||'down'}</span>`;
+      return `<tr><td><div class="cname">${e.name}</div><div class="cimg">${host}</div></td>
+        <td><span class="pill ${band}"><span class="dot"></span>${band==='crit'?'down':'up'}</span></td>
+        <td class="r">${code}</td><td class="r">${lat}</td><td class="r">${cert}</td></tr>`;}).join('');
+  }catch(_){}
 }
 
 /* ---------- render ---------- */
@@ -964,6 +997,7 @@ function copy(txt){if(!txt)return;(navigator.clipboard?.writeText(txt)||Promise.
 $('host').onclick=()=>copy($('host').textContent);
 $('dw-img').onclick=()=>copy($('dw-img').textContent);
 $('nav-containers').onclick=()=>scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
+$('nav-domains').onclick=()=>$('domains-card').scrollIntoView({behavior:'smooth',block:'start'});
 $('nav-logs').onclick=openPal;
 let deepDone=false;
 function applyDeepLink(){const m=location.hash.match(/^#c\/(.+)$/);if(m)openDrawer(decodeURIComponent(m[1]));}
@@ -1008,6 +1042,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
 addEventListener('resize',()=>{drawArea();if(dw.name&&$('pane-over').classList.contains('on'))loadDrawerCharts();if($('mmodal').classList.contains('open'))drawBig();});
 loadEvents();setInterval(loadEvents,5000);
 loadKpiHist();setInterval(loadKpiHist,60000);
+loadDomains();setInterval(loadDomains,30000);
 poll();
 </script>
 </body>

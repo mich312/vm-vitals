@@ -28,6 +28,8 @@ sysinfo = "0.32"               # host cpu/mem/disk/load
 bollard = "0.17"               # Docker API over the socket
 futures-util = "0.3"           # concurrent per-container stats streams
 async-stream = "0.3"           # SSE log streaming
+reqwest = "0.12"               # endpoint reachability + TLS cert reads (default-tls exposes TlsInfo)
+x509-parser = "0.16"           # parse the presented cert's notAfter
 rusqlite = { version = "0.32", features = ["bundled"] }  # embedded time-series store
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

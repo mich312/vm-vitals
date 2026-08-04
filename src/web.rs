@@ -43,6 +43,8 @@ pub struct AppState {
     pub docker: Option<bollard::Docker>,
     /// Recent-events ring for the dashboard "recent activity" strip.
     pub events: Events,
+    /// Latest endpoint-monitor results (reachability + cert expiry).
+    pub endpoints: crate::endpoints::Shared,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -51,6 +53,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/status", get(status))
         .route("/api/series", get(series))
         .route("/api/events", get(events))
+        .route("/api/endpoints", get(endpoints_list))
         .route("/api/logs/:name", get(logs))
         .route("/mcp", post(crate::mcp::handle))
         .route_layer(from_fn_with_state(state.clone(), require_api_auth));
@@ -90,6 +93,11 @@ async fn series(State(state): State<AppState>, Query(q): Query<SeriesQuery>) -> 
 async fn events(State(state): State<AppState>) -> Json<Vec<crate::collect::Event>> {
     let q = state.events.lock().map(|q| q.iter().take(40).cloned().collect()).unwrap_or_default();
     Json(q)
+}
+
+/// Latest endpoint-monitor results.
+async fn endpoints_list(State(state): State<AppState>) -> Json<Vec<crate::endpoints::Status>> {
+    Json(state.endpoints.read().await.clone())
 }
 
 /// Live container logs as Server-Sent Events. The browser's `EventSource`
