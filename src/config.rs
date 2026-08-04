@@ -13,6 +13,28 @@ struct Raw {
     interval: Duration,
     #[serde(default)]
     web: WebRaw,
+    /// Endpoints to health-check (reachability + TLS cert expiry).
+    #[serde(default)]
+    endpoints: Vec<Endpoint>,
+    #[serde(default = "default_ep_interval", with = "humantime_serde")]
+    endpoints_interval: Duration,
+    #[serde(default)]
+    docker: DockerRaw,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DockerRaw {
+    /// Allow start/stop/restart of containers from the dashboard/API. Off by
+    /// default — vitals is read-only until you opt in.
+    #[serde(default)]
+    control: bool,
+}
+
+/// One monitored endpoint from `[[endpoints]]` in the config.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Endpoint {
+    pub name: String,
+    pub url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +71,9 @@ impl Default for WebRaw {
 fn default_interval() -> Duration {
     Duration::from_secs(15)
 }
+fn default_ep_interval() -> Duration {
+    Duration::from_secs(60)
+}
 fn default_bind() -> String {
     "127.0.0.1:9110".to_string()
 }
@@ -64,6 +89,9 @@ pub struct Config {
     pub rp_id: Option<String>,
     pub rp_origin: Option<String>,
     pub data_dir: String,
+    pub endpoints: Vec<Endpoint>,
+    pub endpoints_interval: Duration,
+    pub docker_control: bool,
 }
 
 /// Load config from `--config <path>` (or `-c`), falling back to
@@ -94,5 +122,8 @@ pub fn load() -> anyhow::Result<Config> {
         rp_id: raw.web.rp_id,
         rp_origin: raw.web.rp_origin,
         data_dir: raw.web.data_dir,
+        endpoints: raw.endpoints,
+        endpoints_interval: raw.endpoints_interval,
+        docker_control: raw.docker.control,
     })
 }

@@ -7,6 +7,9 @@
 mod auth;
 mod collect;
 mod config;
+mod endpoints;
+mod mcp;
+mod oauth;
 mod store;
 mod web;
 
@@ -30,23 +33,52 @@ async fn main() -> anyhow::Result<()> {
     // Time-series history store (SQLite, tiered rollups).
     let store = Arc::new(store::Store::open(&format!("{}/vitals.db", cfg.data_dir))?);
 
+    // Shared Docker handle (cheap to clone — wraps an Arc). Used by the
+    // collector loop and by the live-log SSE stream in the web layer.
+    let docker = match bollard::Docker::connect_with_unix_defaults() {
+        Ok(d) => Some(d),
+        Err(e) => {
+            tracing::warn!("no docker socket ({e}); host metrics only");
+            None
+        }
+    };
+
+    // Recent-events ring (restarts, health/state flips, appear/disappear).
+    let events: web::Events = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+
     // Collector loop.
     let coll = snapshot.clone();
     let store_w = store.clone();
+    let events_w = events.clone();
     let tick = cfg.interval;
+    let docker_loop = docker.clone();
     tokio::spawn(async move {
-        let docker = match bollard::Docker::connect_with_unix_defaults() {
-            Ok(d) => Some(d),
-            Err(e) => {
-                tracing::warn!("no docker socket ({e}); host metrics only");
-                None
-            }
-        };
+        let docker = docker_loop;
         let mut host = collect::host::HostCollector::new();
         let mut iv = interval(tick);
+        let mut prev: Vec<collect::Container> = Vec::new();
+        let mut seeded = false;
         loop {
             iv.tick().await;
             let snap = collect::collect(&mut host, docker.as_ref()).await;
+
+            // Diff against the previous tick into the events ring (skip the
+            // first tick so we don't flood with "appeared" on startup).
+            if seeded {
+                let evs = collect::diff_events(&prev, &snap.containers, snap.ts);
+                if !evs.is_empty() {
+                    if let Ok(mut q) = events_w.lock() {
+                        for e in evs {
+                            q.push_front(e);
+                        }
+                        while q.len() > 100 {
+                            q.pop_back();
+                        }
+                    }
+                }
+            }
+            prev = snap.containers.clone();
+            seeded = true;
 
             // Persist raw samples for the history charts (host + per-container).
             let mut pts: Vec<(String, f64)> = vec![
@@ -55,6 +87,8 @@ async fn main() -> anyhow::Result<()> {
                 ("host.disk".into(), snap.host.disk_used_pct as f64),
                 ("host.load".into(), snap.host.load1),
                 ("host.swap".into(), snap.host.swap_used_mb as f64),
+                ("host.net_rx".into(), snap.host.net_rx_bps as f64),
+                ("host.net_tx".into(), snap.host.net_tx_bps as f64),
             ];
             for c in &snap.containers {
                 if let Some(v) = c.cpu_pct {
@@ -86,6 +120,16 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Endpoint monitor (reachability + TLS cert expiry), if configured.
+    let ep_status: endpoints::Shared = Arc::new(RwLock::new(Vec::new()));
+    if !cfg.endpoints.is_empty() {
+        let out = ep_status.clone();
+        let eps = cfg.endpoints.clone();
+        let iv = cfg.endpoints_interval;
+        tracing::info!("endpoint monitor: {} endpoints every {:?}", eps.len(), iv);
+        tokio::spawn(async move { endpoints::run(eps, out, iv).await });
+    }
+
     // Dashboard passkey auth, if the relying-party identity is configured.
     let auth = match (&cfg.rp_id, &cfg.rp_origin) {
         (Some(id), Some(origin)) => match auth::AuthState::new(id, origin, &cfg.data_dir) {
@@ -104,12 +148,28 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // OAuth 2.1 authorization server for MCP — enabled when passkey auth is
+    // configured (it reuses the passkey session for consent).
+    let oauth = cfg
+        .rp_origin
+        .as_ref()
+        .filter(|_| auth.is_some())
+        .map(|origin| Arc::new(oauth::OAuthState::new(origin, &cfg.data_dir)));
+    if oauth.is_some() {
+        tracing::info!("MCP OAuth server enabled (issuer={})", cfg.rp_origin.as_deref().unwrap_or(""));
+    }
+
     // Web server.
     let state = web::AppState {
         snapshot,
         token: cfg.web_token.clone(),
         auth,
         store,
+        docker,
+        events,
+        endpoints: ep_status,
+        control: cfg.docker_control,
+        oauth,
     };
     let listener = tokio::net::TcpListener::bind(cfg.web_bind).await?;
     tracing::info!(

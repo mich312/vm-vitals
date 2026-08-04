@@ -5,14 +5,20 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, Request, State},
-    http::{header, StatusCode},
+    extract::{Path, Query, Request, State},
+    http::{header, HeaderValue, StatusCode},
     middleware::{from_fn_with_state, Next},
-    response::Response,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
     routing::{get, post},
     Json, Router,
 };
+use bollard::container::{LogOutput, LogsOptions};
+use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
+use std::convert::Infallible;
 use tokio::sync::RwLock;
 
 use crate::auth::{self, AuthState};
@@ -21,6 +27,8 @@ use crate::store::Store;
 
 /// Latest snapshot, shared between the collector loop and the web handlers.
 pub type Shared = Arc<RwLock<Option<Snapshot>>>;
+/// Recent-events ring (newest first), shared with the collector loop.
+pub type Events = Arc<std::sync::Mutex<std::collections::VecDeque<crate::collect::Event>>>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -31,13 +39,30 @@ pub struct AppState {
     pub auth: Option<AuthState>,
     /// Time-series history store.
     pub store: Arc<Store>,
+    /// Docker handle for the live-log SSE stream. None = no socket.
+    pub docker: Option<bollard::Docker>,
+    /// Recent-events ring for the dashboard "recent activity" strip.
+    pub events: Events,
+    /// Latest endpoint-monitor results (reachability + cert expiry).
+    pub endpoints: crate::endpoints::Shared,
+    /// Whether start/stop/restart of containers is allowed.
+    pub control: bool,
+    /// OAuth 2.1 authorization server for MCP (None = token/session only).
+    pub oauth: Option<Arc<crate::oauth::OAuthState>>,
 }
 
 pub fn router(state: AppState) -> Router {
-    // /api/* : bearer token OR a valid dashboard session.
+    // /api/* + /mcp : bearer token OR a valid dashboard session.
     let api = Router::new()
         .route("/api/status", get(status))
         .route("/api/series", get(series))
+        .route("/api/events", get(events))
+        .route("/api/endpoints", get(endpoints_list))
+        .route("/api/env/:name", get(container_env))
+        .route("/api/caps", get(caps))
+        .route("/api/container/:name/:action", post(container_control))
+        .route("/api/logs/:name", get(logs))
+        .route("/mcp", post(crate::mcp::handle))
         .route_layer(from_fn_with_state(state.clone(), require_api_auth));
 
     Router::new()
@@ -49,6 +74,13 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/register/finish", post(auth::register_finish))
         .route("/auth/login/start", post(auth::login_start))
         .route("/auth/login/finish", post(auth::login_finish))
+        // OAuth 2.1 authorization server (public — discovery, DCR, authorize, token).
+        .route("/.well-known/oauth-protected-resource", get(crate::oauth::protected_resource))
+        .route("/.well-known/oauth-authorization-server", get(crate::oauth::authorization_server))
+        .route("/oauth/register", post(crate::oauth::register))
+        .route("/oauth/authorize", get(crate::oauth::authorize))
+        .route("/oauth/authorize/decision", post(crate::oauth::decision))
+        .route("/oauth/token", post(crate::oauth::token))
         .merge(api)
         .with_state(state)
 }
@@ -71,38 +103,182 @@ async fn series(State(state): State<AppState>, Query(q): Query<SeriesQuery>) -> 
     Json(serde_json::json!({ "res": res, "t": s.t, "avg": s.avg, "min": s.min, "max": s.max }))
 }
 
-async fn require_api_auth(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let headers = req.headers();
+/// Recent events (newest first), capped.
+async fn events(State(state): State<AppState>) -> Json<Vec<crate::collect::Event>> {
+    let q = state.events.lock().map(|q| q.iter().take(40).cloned().collect()).unwrap_or_default();
+    Json(q)
+}
 
-    // 1) Bearer token (API / MCP clients).
-    if let Some(expected) = state.token.as_deref() {
-        let ok = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "))
-            .map(|got| got == expected)
-            .unwrap_or(false);
-        if ok {
-            return Ok(next.run(req).await);
+/// Latest endpoint-monitor results.
+async fn endpoints_list(State(state): State<AppState>) -> Json<Vec<crate::endpoints::Status>> {
+    Json(state.endpoints.read().await.clone())
+}
+
+/// UI capabilities (so the dashboard shows/hides control buttons).
+async fn caps(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "control": state.control }))
+}
+
+/// A container's environment variables, as [{key,value}] sorted by key. The
+/// dashboard masks secret-looking values client-side.
+async fn container_env(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let docker = state
+        .docker
+        .clone()
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "docker unavailable".into()))?;
+    let info = docker
+        .inspect_container(&name, None)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let mut vars: Vec<serde_json::Value> = info
+        .config
+        .and_then(|c| c.env)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|kv| {
+            let (k, v) = kv.split_once('=').unwrap_or((kv.as_str(), ""));
+            serde_json::json!({ "key": k, "value": v })
+        })
+        .collect();
+    vars.sort_by(|a, b| a["key"].as_str().cmp(&b["key"].as_str()));
+    Ok(Json(serde_json::Value::Array(vars)))
+}
+
+/// Start / stop / restart a container. Gated by the `[docker] control` flag.
+async fn container_control(
+    State(state): State<AppState>,
+    Path((name, action)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    if !state.control {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "container control is disabled (set [docker] control = true)".into(),
+        ));
+    }
+    let docker = state
+        .docker
+        .clone()
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "docker unavailable".into()))?;
+    let res = match action.as_str() {
+        "start" => docker
+            .start_container(&name, None::<bollard::container::StartContainerOptions<String>>)
+            .await,
+        "stop" => docker
+            .stop_container(&name, None::<bollard::container::StopContainerOptions>)
+            .await,
+        "restart" => docker
+            .restart_container(&name, None::<bollard::container::RestartContainerOptions>)
+            .await,
+        _ => return Err((StatusCode::BAD_REQUEST, "unknown action".into())),
+    };
+    match res {
+        Ok(_) => {
+            tracing::info!("container {action}: {name}");
+            Ok(Json(serde_json::json!({ "ok": true, "action": action, "name": name })))
+        }
+        Err(e) => Err((StatusCode::BAD_GATEWAY, e.to_string())),
+    }
+}
+
+/// Live container logs as Server-Sent Events. The browser's `EventSource`
+/// can't set an Authorization header, so this rides the dashboard session
+/// cookie (accepted by `require_api_auth`). Each event's data is
+/// `{"s":"out"|"err","m":"<line>"}`.
+async fn logs(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let docker = state.docker.clone();
+    let stream = async_stream::stream! {
+        let Some(d) = docker else {
+            yield Ok(Event::default().event("fatal").data("docker socket unavailable"));
+            return;
+        };
+        let opts = LogsOptions::<String> {
+            follow: true,
+            stdout: true,
+            stderr: true,
+            tail: "300".to_string(),
+            ..Default::default()
+        };
+        let mut logs = d.logs(&name, Some(opts));
+        while let Some(item) = logs.next().await {
+            match item {
+                Ok(out) => {
+                    let (s, bytes) = match out {
+                        LogOutput::StdErr { message } => ("err", message),
+                        LogOutput::StdOut { message }
+                        | LogOutput::Console { message }
+                        | LogOutput::StdIn { message } => ("out", message),
+                    };
+                    let text = String::from_utf8_lossy(&bytes);
+                    for line in text.split_inclusive('\n') {
+                        let line = line.trim_end_matches(['\n', '\r']);
+                        if line.is_empty() {
+                            continue;
+                        }
+                        let data = serde_json::json!({ "s": s, "m": line }).to_string();
+                        yield Ok(Event::default().data(data));
+                    }
+                }
+                Err(e) => {
+                    yield Ok(Event::default().event("fatal").data(e.to_string()));
+                    break;
+                }
+            }
+        }
+    };
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn require_api_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let headers = req.headers();
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "));
+
+    // 1) Static bearer token (CLI / scripts).
+    if let (Some(expected), Some(got)) = (state.token.as_deref(), bearer) {
+        if got == expected {
+            return next.run(req).await;
         }
     }
 
-    // 2) Dashboard session cookie (browser).
+    // 2) OAuth access token (MCP connectors).
+    if let (Some(o), Some(got)) = (state.oauth.as_ref(), bearer) {
+        if o.validate(got) {
+            return next.run(req).await;
+        }
+    }
+
+    // 3) Dashboard session cookie (browser).
     if let Some(a) = &state.auth {
         let cookie = headers.get(header::COOKIE).and_then(|h| h.to_str().ok());
         if a.session_valid_in(cookie) {
-            return Ok(next.run(req).await);
+            return next.run(req).await;
         }
     }
 
-    // 3) Nothing configured at all → open (loopback dev).
+    // 4) Nothing configured at all → open (loopback dev).
     if state.token.is_none() && state.auth.is_none() {
-        return Ok(next.run(req).await);
+        return next.run(req).await;
     }
 
-    Err(StatusCode::UNAUTHORIZED)
+    // 401 — point OAuth clients at the protected-resource metadata so they can
+    // discover the authorization server (RFC 9728).
+    let mut resp = StatusCode::UNAUTHORIZED.into_response();
+    if let Some(o) = &state.oauth {
+        let val = format!(
+            "Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource\"",
+            o.issuer
+        );
+        if let Ok(hv) = HeaderValue::from_str(&val) {
+            resp.headers_mut().insert(header::WWW_AUTHENTICATE, hv);
+        }
+    }
+    resp
 }

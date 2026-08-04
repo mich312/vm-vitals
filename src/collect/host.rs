@@ -1,7 +1,9 @@
 //! Host metrics via `sysinfo`: CPU, memory, swap, disk (`/`), load, uptime.
 
+use std::time::Instant;
+
 use serde::Serialize;
-use sysinfo::{Disks, System};
+use sysinfo::{Disks, Networks, System};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HostMetrics {
@@ -18,23 +20,44 @@ pub struct HostMetrics {
     pub load5: f64,
     pub load15: f64,
     pub uptime_secs: u64,
+    /// Network throughput across all interfaces, bytes/sec, averaged over the tick.
+    pub net_rx_bps: u64,
+    pub net_tx_bps: u64,
 }
 
 /// Keeps a `System` between ticks so CPU usage is measured over the interval.
 pub struct HostCollector {
     sys: System,
+    networks: Networks,
+    last_net: Instant,
 }
 
 impl HostCollector {
     pub fn new() -> Self {
         let mut sys = System::new_all();
         sys.refresh_all();
-        Self { sys }
+        Self {
+            sys,
+            networks: Networks::new_with_refreshed_list(),
+            last_net: Instant::now(),
+        }
     }
 
     pub fn collect(&mut self) -> HostMetrics {
         self.sys.refresh_cpu_all();
         self.sys.refresh_memory();
+
+        // Network deltas since the last refresh → bytes/sec over the elapsed window.
+        self.networks.refresh();
+        let (mut rx, mut tx) = (0u64, 0u64);
+        for (_name, data) in &self.networks {
+            rx += data.received();
+            tx += data.transmitted();
+        }
+        let elapsed = self.last_net.elapsed().as_secs_f64().max(0.001);
+        self.last_net = Instant::now();
+        let net_rx_bps = (rx as f64 / elapsed) as u64;
+        let net_tx_bps = (tx as f64 / elapsed) as u64;
 
         let cpu_pct = self.sys.global_cpu_usage();
 
@@ -76,6 +99,8 @@ impl HostCollector {
             load5: la.five,
             load15: la.fifteen,
             uptime_secs: System::uptime(),
+            net_rx_bps,
+            net_tx_bps,
         }
     }
 }
