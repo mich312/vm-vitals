@@ -45,6 +45,8 @@ pub struct AppState {
     pub events: Events,
     /// Latest endpoint-monitor results (reachability + cert expiry).
     pub endpoints: crate::endpoints::Shared,
+    /// Whether start/stop/restart of containers is allowed.
+    pub control: bool,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -54,6 +56,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/series", get(series))
         .route("/api/events", get(events))
         .route("/api/endpoints", get(endpoints_list))
+        .route("/api/env/:name", get(container_env))
+        .route("/api/caps", get(caps))
+        .route("/api/container/:name/:action", post(container_control))
         .route("/api/logs/:name", get(logs))
         .route("/mcp", post(crate::mcp::handle))
         .route_layer(from_fn_with_state(state.clone(), require_api_auth));
@@ -98,6 +103,75 @@ async fn events(State(state): State<AppState>) -> Json<Vec<crate::collect::Event
 /// Latest endpoint-monitor results.
 async fn endpoints_list(State(state): State<AppState>) -> Json<Vec<crate::endpoints::Status>> {
     Json(state.endpoints.read().await.clone())
+}
+
+/// UI capabilities (so the dashboard shows/hides control buttons).
+async fn caps(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "control": state.control }))
+}
+
+/// A container's environment variables, as [{key,value}] sorted by key. The
+/// dashboard masks secret-looking values client-side.
+async fn container_env(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let docker = state
+        .docker
+        .clone()
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "docker unavailable".into()))?;
+    let info = docker
+        .inspect_container(&name, None)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let mut vars: Vec<serde_json::Value> = info
+        .config
+        .and_then(|c| c.env)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|kv| {
+            let (k, v) = kv.split_once('=').unwrap_or((kv.as_str(), ""));
+            serde_json::json!({ "key": k, "value": v })
+        })
+        .collect();
+    vars.sort_by(|a, b| a["key"].as_str().cmp(&b["key"].as_str()));
+    Ok(Json(serde_json::Value::Array(vars)))
+}
+
+/// Start / stop / restart a container. Gated by the `[docker] control` flag.
+async fn container_control(
+    State(state): State<AppState>,
+    Path((name, action)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    if !state.control {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "container control is disabled (set [docker] control = true)".into(),
+        ));
+    }
+    let docker = state
+        .docker
+        .clone()
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "docker unavailable".into()))?;
+    let res = match action.as_str() {
+        "start" => docker
+            .start_container(&name, None::<bollard::container::StartContainerOptions<String>>)
+            .await,
+        "stop" => docker
+            .stop_container(&name, None::<bollard::container::StopContainerOptions>)
+            .await,
+        "restart" => docker
+            .restart_container(&name, None::<bollard::container::RestartContainerOptions>)
+            .await,
+        _ => return Err((StatusCode::BAD_REQUEST, "unknown action".into())),
+    };
+    match res {
+        Ok(_) => {
+            tracing::info!("container {action}: {name}");
+            Ok(Json(serde_json::json!({ "ok": true, "action": action, "name": name })))
+        }
+        Err(e) => Err((StatusCode::BAD_GATEWAY, e.to_string())),
+    }
 }
 
 /// Live container logs as Server-Sent Events. The browser's `EventSource`

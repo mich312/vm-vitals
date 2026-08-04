@@ -156,6 +156,7 @@ async fn main() -> anyhow::Result<()> {
         docker,
         events,
         endpoints: ep_status,
+        control: cfg.docker_control,
     };
     let listener = tokio::net::TcpListener::bind(cfg.web_bind).await?;
     tracing::info!(

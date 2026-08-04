@@ -225,6 +225,27 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
 .dw-tab{font:600 12px var(--font);color:var(--ink-3);background:transparent;border:0;padding:7px 12px;border-radius:7px;cursor:pointer}
 .dw-tab:hover{color:var(--ink)}
 .dw-tab.on{background:var(--surface-2);color:var(--ink)}
+.dw-ctl{display:flex;gap:8px;margin-top:12px}
+.ctlbtn{font:600 12px var(--font);padding:7px 12px;border-radius:8px;border:1px solid var(--line);
+  background:var(--surface-2);color:var(--ink-2);cursor:pointer}
+.ctlbtn:hover{color:var(--ink);border-color:var(--ink-3)}
+.ctlbtn.go{color:var(--ok);border-color:rgba(51,198,110,.3)}
+.ctlbtn.danger{color:var(--crit);border-color:rgba(240,85,90,.3)}
+.ctlbtn:disabled{opacity:.5;cursor:default}
+.envbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:11.5px;color:var(--ink-3)}
+.envbar button{margin-left:auto;font:600 11px var(--font);padding:6px 10px;border-radius:8px;border:1px solid var(--line);
+  background:var(--surface-2);color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.envbar button:hover{color:var(--ink)}
+.envtable{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)}
+.envtable td{padding:8px 6px;border-bottom:1px solid var(--line-soft);vertical-align:top;word-break:break-all}
+.envtable tr:last-child td{border-bottom:0}
+.env-k{color:var(--series-1);width:42%}
+.env-mask{cursor:pointer;color:var(--ink-3)}
+.env-mask:hover{color:var(--ink-2)}
+.env-eye{color:var(--pulse);font:10px var(--font);margin-left:6px}
+.dom-link{display:block;color:inherit}
+.dom-link .cname{transition:color .12s}
+.dom-link:hover .cname{color:var(--pulse)}
 .dw-body{flex:1;overflow:auto;padding:16px 20px}
 .dw-pane{display:none}.dw-pane.on{display:block}
 .metricbox{margin-bottom:16px}
@@ -402,8 +423,10 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
     <div class="dw-tabs">
       <button class="dw-tab on" data-p="over">Overview</button>
       <button class="dw-tab" data-p="logs">Logs</button>
+      <button class="dw-tab" data-p="env">Env</button>
       <button class="dw-tab" data-p="meta">Meta</button>
     </div>
+    <div class="dw-ctl" id="dw-ctl"></div>
   </div>
   <div class="dw-body">
     <div class="dw-pane on" id="pane-over">
@@ -425,6 +448,10 @@ tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--crit)}
       </div>
       <div class="logview" id="logview"></div>
       <div class="logstat" id="logstat"><span class="lv"></span><span id="logstat-t">connecting…</span></div>
+    </div>
+    <div class="dw-pane" id="pane-env">
+      <div class="envbar"><span>Values that look like secrets are hidden.</span><button id="env-toggle">reveal all</button></div>
+      <table class="envtable"><tbody id="env-rows"></tbody></table>
     </div>
     <div class="dw-pane" id="pane-meta">
       <table class="metatable" id="dw-meta"></table>
@@ -645,7 +672,7 @@ async function loadDomains(){
         (e.cert_days<0?'<span class="c-crit">expired</span>':`<span class="${e.cert_days<7?'c-crit':e.cert_days<21?'c-warn':''}">${e.cert_days}d</span>`);
       const lat=e.status?e.latency_ms+' ms':'<span class="dim">—</span>';
       const code=e.status?`<span class="${e.status<400?'':e.status<500?'c-warn':'c-crit'}">${e.status}</span>`:`<span class="c-crit">${e.error||'down'}</span>`;
-      return `<tr><td><div class="cname">${e.name}</div><div class="cimg">${host}</div></td>
+      return `<tr><td><a class="dom-link" href="${e.url}" target="_blank" rel="noopener"><div class="cname">${e.name} ↗</div><div class="cimg">${host}</div></a></td>
         <td><span class="pill ${band}"><span class="dot"></span>${band==='crit'?'down':'up'}</span></td>
         <td class="r">${code}</td><td class="r">${lat}</td><td class="r">${cert}</td></tr>`;}).join('');
   }catch(_){}
@@ -759,6 +786,7 @@ function renderDrawer(){
     ['Mem limit',c.mem_limit_mb?fmtMem(c.mem_limit_mb):'—'],
     ['Status',c.status],['Image',c.image]
   ].map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  renderCtl(c);
 }
 async function loadDrawerCharts(){
   const name=dw.name;if(!name)return;
@@ -773,7 +801,53 @@ function showPane(p){
   document.querySelectorAll('.dw-pane').forEach(el=>el.classList.toggle('on',el.id==='pane-'+p));
   if(p==='logs')startLogs();else stopLogs();
   if(p==='over')loadDrawerCharts();
+  if(p==='env')loadEnv();
 }
+/* container env (secret-looking values masked) */
+const SECRET_RE=/(pass|secret|token|key|cred|auth|priv|pwd|salt|sign|dsn|conn)/i;
+let envData=[],envReveal=new Set();
+function renderEnv(){
+  const box=$('env-rows');
+  if(!envData.length){box.innerHTML='<tr><td class="dim" style="padding:12px">no environment variables</td></tr>';return;}
+  box.innerHTML=envData.map((e,i)=>{
+    const hidden=SECRET_RE.test(e.key)&&!envReveal.has(i);
+    const v=hidden?`<span class="env-mask" data-i="${i}">••••••••<span class="env-eye">show</span></span>`:esc(e.value)||'<span class="dim">(empty)</span>';
+    return `<tr><td class="env-k">${esc(e.key)}</td><td>${v}</td></tr>`;}).join('');
+}
+async function loadEnv(){
+  const name=dw.name;if(!name)return;envReveal.clear();$('env-toggle').textContent='reveal all';
+  $('env-rows').innerHTML='<tr><td class="dim" style="padding:12px">loading…</td></tr>';
+  try{const env=await fetch('/api/env/'+encodeURIComponent(name)).then(r=>r.json());if(dw.name!==name)return;
+    envData=Array.isArray(env)?env:[];renderEnv();
+  }catch(_){$('env-rows').innerHTML='<tr><td class="dim" style="padding:12px">failed to load env</td></tr>';}
+}
+$('env-rows').addEventListener('click',e=>{const m=e.target.closest('.env-mask');if(m){envReveal.add(+m.dataset.i);renderEnv();}});
+$('env-toggle').onclick=()=>{
+  if(envReveal.size){envReveal.clear();$('env-toggle').textContent='reveal all';}
+  else{envData.forEach((e,i)=>{if(SECRET_RE.test(e.key))envReveal.add(i);});$('env-toggle').textContent='hide all';}
+  renderEnv();
+};
+/* container controls (start/stop/restart) — gated by server caps */
+let caps={control:false};
+fetch('/api/caps').then(r=>r.json()).then(c=>{caps=c||caps;if(dw.name)renderCtl(curC());}).catch(()=>{});
+function renderCtl(c){
+  const el=$('dw-ctl');if(!el)return;
+  if(!caps.control||!c){el.innerHTML='';return;}
+  const running=c.state==='running';
+  el.innerHTML=running
+    ? `<button class="ctlbtn" data-act="restart">Restart</button><button class="ctlbtn danger" data-act="stop">Stop</button>`
+    : `<button class="ctlbtn go" data-act="start">Start</button>`;
+}
+$('dw-ctl').addEventListener('click',async e=>{
+  const b=e.target.closest('.ctlbtn');if(!b||!dw.name)return;
+  const act=b.dataset.act;
+  if((act==='stop'||act==='restart')&&!confirm(`${act} ${dw.name}?`))return;
+  document.querySelectorAll('#dw-ctl .ctlbtn').forEach(x=>x.disabled=true);b.textContent='…';
+  try{const r=await fetch(`/api/container/${encodeURIComponent(dw.name)}/${act}`,{method:'POST'});
+    if(r.ok){toast(`${act} sent to ${dw.name}`);setTimeout(poll,600);}
+    else{toast('failed: '+(await r.text()).slice(0,80));renderCtl(curC());}
+  }catch(_){toast('request failed');renderCtl(curC());}
+});
 function openDrawer(name){
   dw.name=name;
   if(location.hash!=='#c/'+encodeURIComponent(name))history.replaceState(null,'','#c/'+encodeURIComponent(name));

@@ -18,6 +18,16 @@ struct Raw {
     endpoints: Vec<Endpoint>,
     #[serde(default = "default_ep_interval", with = "humantime_serde")]
     endpoints_interval: Duration,
+    #[serde(default)]
+    docker: DockerRaw,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DockerRaw {
+    /// Allow start/stop/restart of containers from the dashboard/API. Off by
+    /// default — vitals is read-only until you opt in.
+    #[serde(default)]
+    control: bool,
 }
 
 /// One monitored endpoint from `[[endpoints]]` in the config.
@@ -81,6 +91,7 @@ pub struct Config {
     pub data_dir: String,
     pub endpoints: Vec<Endpoint>,
     pub endpoints_interval: Duration,
+    pub docker_control: bool,
 }
 
 /// Load config from `--config <path>` (or `-c`), falling back to
@@ -113,5 +124,6 @@ pub fn load() -> anyhow::Result<Config> {
         data_dir: raw.web.data_dir,
         endpoints: raw.endpoints,
         endpoints_interval: raw.endpoints_interval,
+        docker_control: raw.docker.control,
     })
 }

@@ -42,6 +42,10 @@ cert_days_crit = 3
 socket = "/var/run/docker.sock"
 # Watch everything, or narrow to specific compose projects:
 # projects = ["my-stack"]
+# Allow start/stop/restart of containers from the dashboard/API. Off by default —
+# vitals is read-only until you opt in. Anyone with dashboard/API access can then
+# control containers, so only enable it behind trusted auth.
+control = false
 
 [retention]
 raw = "48h"                      # 15s samples
