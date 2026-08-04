@@ -682,18 +682,34 @@ function render(d){
 const DR_SPANS={'1H':3600,'6H':21600,'24H':86400,'7D':604800};
 const dw={name:null,range:'1H',es:null,follow:true,wrap:true,lines:[],filter:''};
 const curC=()=>((last&&last.containers)||[]).find(c=>c.name===dw.name);
-function miniChart(cv,vals,color){
+function miniChart(cv,vals,color,times,unit){
   const w=cv.clientWidth||480,h=cv.clientHeight||120,dpr=Math.min(devicePixelRatio||1,2);
   if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr;}
   const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);g.lineCap='round';g.lineJoin='round';
-  const pad={l:6,r:8,t:12,b:10};
-  if(!vals||vals.length<2){g.fillStyle=HEX.idle;g.font='11px sans-serif';g.textAlign='center';g.fillText('collecting history…',w/2,h/2);return;}
-  const n=vals.length,mx=Math.max(...vals),mn=Math.min(...vals),flat=(mx-mn)<1e-6,rng=Math.max(1e-6,mx-mn);
-  const x=i=>pad.l+(i/(n-1))*(w-pad.l-pad.r),y=v=>flat?pad.t+(h-pad.t-pad.b)*0.5:pad.t+(1-(v-mn)/rng)*(h-pad.t-pad.b);
+  const pad={l:40,r:10,t:12,b:18};
+  if(!vals||vals.length<2){g.fillStyle=HEX.idle;g.font='11px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText('collecting history…',w/2,h/2);return;}
+  const n=vals.length,mx=Math.max(...vals),mn=Math.min(...vals),flat=(mx-mn)<1e-6;
+  let lo=mn,hi=mx;if(flat){const c=mn||1;lo=c-Math.abs(c)*0.1-1;hi=c+Math.abs(c)*0.1+1;}
+  const sp=Math.max(hi-lo,1e-6);lo-=sp*0.1;hi+=sp*0.1;const rng=hi-lo||1;
+  const x=i=>pad.l+(i/(n-1))*(w-pad.l-pad.r),y=v=>pad.t+(1-(v-lo)/rng)*(h-pad.t-pad.b);
+  const fmtY=v=>unit==='MB'?(v>=1000?(v/1000).toFixed(1)+'G':Math.round(v)+'M'):Math.round(v)+(unit==='%'?'':'');
+  // y grid + labels
+  g.font='9px '+MONO;g.textAlign='right';g.textBaseline='middle';
+  for(let i=0;i<=2;i++){const val=hi-(hi-lo)*i/2,yy=pad.t+(h-pad.t-pad.b)*i/2;
+    g.setLineDash(i===2?[]:[1,3]);g.strokeStyle=i===2?'rgba(255,255,255,.08)':'rgba(255,255,255,.045)';
+    g.beginPath();g.moveTo(pad.l,yy);g.lineTo(w-pad.r,yy);g.stroke();
+    g.fillStyle=HEX.idle;g.fillText(fmtY(val),pad.l-5,yy);}
+  g.setLineDash([]);
+  // fill + trace + node
   g.beginPath();g.moveTo(x(0),h-pad.b);for(let i=0;i<n;i++)g.lineTo(x(i),y(vals[i]));g.lineTo(x(n-1),h-pad.b);g.closePath();
   const gr=g.createLinearGradient(0,pad.t,0,h-pad.b);gr.addColorStop(0,color+'26');gr.addColorStop(1,color+'00');g.fillStyle=gr;g.fill();
   g.beginPath();g.moveTo(x(0),y(vals[0]));for(let i=1;i<n;i++)g.lineTo(x(i),y(vals[i]));g.strokeStyle=color;g.lineWidth=1.75;g.stroke();
   const px=x(n-1),py=y(vals[n-1]);g.fillStyle=color;g.beginPath();g.arc(px,py,2.6,0,7);g.fill();
+  // x time labels
+  if(times&&times.length>1){g.fillStyle=HEX.idle;g.textAlign='center';g.textBaseline='alphabetic';const p=z=>String(z).padStart(2,'0');
+    for(let k=0;k<=3;k++){const i=Math.round((n-1)*k/3),xx=x(i),dt=new Date((times[i]||0)*1000);
+      const lbl=(dw.range==='7D')?((dt.getMonth()+1)+'/'+dt.getDate()):(p(dt.getHours())+':'+p(dt.getMinutes()));
+      g.fillText(lbl,xx,h-5);}}
 }
 function renderDrawer(){
   const c=curC();if(!c)return;
@@ -716,7 +732,7 @@ async function loadDrawerCharts(){
   const to=Math.floor(Date.now()/1000),from=to-DR_SPANS[dw.range];
   const q=m=>`/api/series?metric=c.${encodeURIComponent(name)}.${m}&from=${from}&to=${to}`;
   try{const [cpu,mem]=await Promise.all([fetch(q('cpu')).then(r=>r.json()),fetch(q('mem')).then(r=>r.json())]);
-    if(dw.name!==name)return;miniChart($('dw-cpu'),cpu.avg,HEX.series1);miniChart($('dw-mem'),mem.avg,HEX.series2);
+    if(dw.name!==name)return;miniChart($('dw-cpu'),cpu.avg,HEX.series1,cpu.t,'%');miniChart($('dw-mem'),mem.avg,HEX.series2,mem.t,'MB');
   }catch(e){}
 }
 function showPane(p){
@@ -779,8 +795,12 @@ function drawBig(){
   if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr;}
   const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);g.lineCap='round';g.lineJoin='round';
   const pad={l:52,r:18,t:14,b:24},pct=mm.spec&&mm.spec.unit==='%';
-  let lo=0,hi=100;
-  if(!pct){hi=1;for(const s of mm.series)for(const v of s.vals)if(v>hi)hi=v;hi*=1.12;}
+  // auto-scale to the data (with headroom) so the expanded chart matches the
+  // widget sparkline's shape — and actually shows detail rather than a flat band.
+  let lo=0,hi=1;
+  {const av=[];for(const s of mm.series)for(const v of s.vals)if(v!=null&&isFinite(v))av.push(v);
+   if(av.length){const dmin=Math.min(...av),dmax=Math.max(...av),span=Math.max(dmax-dmin,pct?4:Math.max(dmax*0.05,1));
+     lo=Math.max(0,dmin-span*0.15);hi=dmax+span*0.15;if(pct)hi=Math.min(100,hi);if(hi-lo<1e-6)hi=lo+1;}}
   const Y=val=>pad.t+(1-clamp((val-lo)/(hi-lo||1),0,1))*(h-pad.t-pad.b);
   g.fillStyle=HEX.idle;g.font='10px '+MONO;g.textAlign='right';g.textBaseline='middle';
   for(let i=0;i<=4;i++){const val=lo+(hi-lo)*(1-i/4),y=pad.t+(h-pad.t-pad.b)*i/4;
