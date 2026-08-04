@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitals · authorize</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236a7bff'/%3E%3Cstop offset='1' stop-color='%234555d6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='24' y='24' width='464' height='464' rx='116' fill='url(%23g)'/%3E%3Cpath d='M96 268 H196 L242 150 L300 386 L338 300 H392' fill='none' stroke='white' stroke-width='34' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='410' cy='300' r='24' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0A0C0F; --surface-1:#101318; --surface-2:#161A20; --surface-3:#1D222A;
+    --line:#262C35; --ink:#ECEEF2; --ink-2:#AEB6C0; --ink-3:#7E8896;
+    --accent:#21E0C6; --crit:#F0555A; --grid-line:rgba(120,150,180,.05);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;color:var(--ink);
+    font:15px/1.5 var(--font);-webkit-font-smoothing:antialiased;
+    background:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+      var(--bg);
+    background-size:32px 32px, 32px 32px, auto}
+  main{width:400px;max-width:92vw;padding:30px 28px 24px;text-align:center;
+    background:var(--surface-1);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.5)}
+  .mk{width:44px;height:44px;margin:0 auto 14px;border-radius:12px;display:grid;place-items:center;
+    background:var(--surface-2);border:1px solid var(--line);color:var(--accent)}
+  h1{font-size:15px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin:0 0 16px;color:var(--ink-2)}
+  .lead{font-size:16px;margin:0 0 4px}
+  .lead b{color:var(--accent)}
+  .sub{color:var(--ink-3);font-size:13px;margin:0 0 20px}
+  .scopes{text-align:left;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+    padding:12px 14px;margin:0 0 20px;font-size:12.5px;color:var(--ink-2)}
+  .scopes .t{font:10px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+  .scopes li{margin:3px 0;list-style:none;padding-left:16px;position:relative}
+  .scopes li::before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .scopes ul{margin:0;padding:0}
+  .row{display:flex;gap:10px}
+  button{font:600 14px var(--font);flex:1;padding:11px 14px;border-radius:10px;cursor:pointer;
+    transition:filter .15s,transform .05s;border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2)}
+  button:hover{color:var(--ink)}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);color:#04140f;border:0;display:inline-flex;align-items:center;justify-content:center;gap:9px}
+  button.primary:hover{filter:brightness(1.08);color:#04140f}
+  button.primary svg{width:16px;height:16px}
+  .err{color:var(--crit);min-height:1.2em;margin-top:14px;font-size:12.5px}
+  .foot{margin-top:16px;font-size:11px;color:var(--ink-3);word-break:break-all}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<main>
+  <div class="mk"><svg width="23" height="23" viewBox="0 0 96 96" fill="none"><path d="M8 52 H32 L42 24 L54 76 L62 56 H73" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="80" cy="56" r="5.5" fill="currentColor"/></svg></div>
+  <h1>vitals</h1>
+  <p class="lead"><b id="client">An application</b> wants to connect</p>
+  <p class="sub">It will get read-only access to this server's MCP tools.</p>
+  <div class="scopes">
+    <div class="t">Access requested</div>
+    <ul>
+      <li>Read host metrics, containers &amp; logs</li>
+      <li>Read monitored domains &amp; cert status</li>
+      <li>Query historical time-series</li>
+    </ul>
+  </div>
+
+  <div id="signin" class="hidden">
+    <button class="primary" id="login-btn"></button>
+    <p class="sub" style="margin:14px 0 0">Sign in with your passkey to continue.</p>
+  </div>
+
+  <div id="approve" class="hidden">
+    <div class="row">
+      <button id="deny-btn">Deny</button>
+      <button class="primary" id="allow-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Allow</button>
+    </div>
+  </div>
+
+  <div class="err" id="err"></div>
+  <div class="foot" id="foot"></div>
+</main>
+<script>
+const O = __OAUTH_DATA__;
+const $ = id => document.getElementById(id);
+const err = $('err');
+$('client').textContent = O.client || 'An application';
+$('foot').textContent = O.params.redirect_uri || '';
+
+const b64uToBuf = s => { s = s.replace(/-/g,'+').replace(/_/g,'/'); s += '='.repeat((4 - s.length % 4) % 4);
+  const bin = atob(s), b = new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) b[i]=bin.charCodeAt(i); return b.buffer; };
+const bufToB64u = buf => { const b = new Uint8Array(buf); let s=''; for (const x of b) s += String.fromCharCode(x);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); };
+async function jget(url, opts){ const r = await fetch(url, opts); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+
+async function login(){
+  err.textContent = '';
+  const opt = await jget('/auth/login/start', { method:'POST' });
+  const pk = opt.publicKey; pk.challenge = b64uToBuf(pk.challenge);
+  (pk.allowCredentials || []).forEach(c => c.id = b64uToBuf(c.id));
+  const cred = await navigator.credentials.get({ publicKey: pk });
+  const r = await fetch('/auth/login/finish', { method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({ id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
+      response: { authenticatorData: bufToB64u(cred.response.authenticatorData),
+                  clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+                  signature: bufToB64u(cred.response.signature),
+                  userHandle: cred.response.userHandle ? bufToB64u(cred.response.userHandle) : null } }) });
+  if (r.ok) location.reload(); else err.textContent = await r.text();
+}
+
+function decide(decision){
+  const f = document.createElement('form');
+  f.method = 'POST'; f.action = '/oauth/authorize/decision';
+  const add = (k,v) => { const i = document.createElement('input'); i.type='hidden'; i.name=k; i.value=v; f.appendChild(i); };
+  for (const [k,v] of Object.entries(O.params)) add(k, v);
+  add('decision', decision);
+  document.body.appendChild(f); f.submit();
+}
+
+if (O.authed) {
+  $('approve').classList.remove('hidden');
+  $('allow-btn').onclick = () => decide('allow');
+  $('deny-btn').onclick = () => decide('deny');
+} else {
+  $('signin').classList.remove('hidden');
+  const KEY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M4 12a8 8 0 0 1 16 0c0 1.5-.13 3-.35 4.5"/><path d="M7.3 17.5c.3-1 .5-2.3.5-3.5a4.2 4.2 0 0 1 8.4 0c0 2-.2 3.6-.5 5"/><path d="M12 14c0 3-.3 5.5-1 8"/></svg>';
+  const b = $('login-btn'); b.innerHTML = KEY + '<span>Sign in with passkey</span>'; b.onclick = () => login().catch(e => err.textContent = e.message);
+}
+</script>
+</body>
+</html>

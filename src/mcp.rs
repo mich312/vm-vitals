@@ -1,8 +1,10 @@
 //! Minimal MCP server over the Streamable HTTP transport (JSON-RPC on
 //! `POST /mcp`). Exposes read-only tools over the same data the dashboard
 //! shows, so an agent can ask "how's the box doing?". Stateless — no session
-//! id, single JSON response per request. Auth is the shared bearer token,
-//! enforced by `web::require_api_auth` on the route.
+//! id, single JSON response per request. Auth is a bearer token — either the
+//! static `$VITALS_TOKEN` or an OAuth access token (see `oauth.rs`) — enforced
+//! by `web::require_api_auth`, which 401s with a `WWW-Authenticate` pointing at
+//! the OAuth discovery document so connectors can start the flow.
 
 use axum::{
     extract::State,

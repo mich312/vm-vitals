@@ -39,6 +39,9 @@ webauthn-rs = "0.5"
 uuid = { version = "1", features = ["v4", "serde"] }
 axum-extra = { version = "0.9", features = ["cookie"] }
 rand = "0.8"
+# OAuth 2.1 authorization server for MCP (PKCE + opaque tokens).
+base64 = "0.22"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = "z"

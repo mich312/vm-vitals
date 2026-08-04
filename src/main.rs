@@ -9,6 +9,7 @@ mod collect;
 mod config;
 mod endpoints;
 mod mcp;
+mod oauth;
 mod store;
 mod web;
 
@@ -147,6 +148,17 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // OAuth 2.1 authorization server for MCP — enabled when passkey auth is
+    // configured (it reuses the passkey session for consent).
+    let oauth = cfg
+        .rp_origin
+        .as_ref()
+        .filter(|_| auth.is_some())
+        .map(|origin| Arc::new(oauth::OAuthState::new(origin, &cfg.data_dir)));
+    if oauth.is_some() {
+        tracing::info!("MCP OAuth server enabled (issuer={})", cfg.rp_origin.as_deref().unwrap_or(""));
+    }
+
     // Web server.
     let state = web::AppState {
         snapshot,
@@ -157,6 +169,7 @@ async fn main() -> anyhow::Result<()> {
         events,
         endpoints: ep_status,
         control: cfg.docker_control,
+        oauth,
     };
     let listener = tokio::net::TcpListener::bind(cfg.web_bind).await?;
     tracing::info!(

@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, Request, State},
-    http::{header, StatusCode},
+    http::{header, HeaderValue, StatusCode},
     middleware::{from_fn_with_state, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
-        Response,
+        IntoResponse, Response,
     },
     routing::{get, post},
     Json, Router,
@@ -47,6 +47,8 @@ pub struct AppState {
     pub endpoints: crate::endpoints::Shared,
     /// Whether start/stop/restart of containers is allowed.
     pub control: bool,
+    /// OAuth 2.1 authorization server for MCP (None = token/session only).
+    pub oauth: Option<Arc<crate::oauth::OAuthState>>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -72,6 +74,13 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/register/finish", post(auth::register_finish))
         .route("/auth/login/start", post(auth::login_start))
         .route("/auth/login/finish", post(auth::login_finish))
+        // OAuth 2.1 authorization server (public — discovery, DCR, authorize, token).
+        .route("/.well-known/oauth-protected-resource", get(crate::oauth::protected_resource))
+        .route("/.well-known/oauth-authorization-server", get(crate::oauth::authorization_server))
+        .route("/oauth/register", post(crate::oauth::register))
+        .route("/oauth/authorize", get(crate::oauth::authorize))
+        .route("/oauth/authorize/decision", post(crate::oauth::decision))
+        .route("/oauth/token", post(crate::oauth::token))
         .merge(api)
         .with_state(state)
 }
@@ -225,38 +234,51 @@ async fn logs(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-async fn require_api_auth(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+async fn require_api_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let headers = req.headers();
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "));
 
-    // 1) Bearer token (API / MCP clients).
-    if let Some(expected) = state.token.as_deref() {
-        let ok = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "))
-            .map(|got| got == expected)
-            .unwrap_or(false);
-        if ok {
-            return Ok(next.run(req).await);
+    // 1) Static bearer token (CLI / scripts).
+    if let (Some(expected), Some(got)) = (state.token.as_deref(), bearer) {
+        if got == expected {
+            return next.run(req).await;
         }
     }
 
-    // 2) Dashboard session cookie (browser).
+    // 2) OAuth access token (MCP connectors).
+    if let (Some(o), Some(got)) = (state.oauth.as_ref(), bearer) {
+        if o.validate(got) {
+            return next.run(req).await;
+        }
+    }
+
+    // 3) Dashboard session cookie (browser).
     if let Some(a) = &state.auth {
         let cookie = headers.get(header::COOKIE).and_then(|h| h.to_str().ok());
         if a.session_valid_in(cookie) {
-            return Ok(next.run(req).await);
+            return next.run(req).await;
         }
     }
 
-    // 3) Nothing configured at all → open (loopback dev).
+    // 4) Nothing configured at all → open (loopback dev).
     if state.token.is_none() && state.auth.is_none() {
-        return Ok(next.run(req).await);
+        return next.run(req).await;
     }
 
-    Err(StatusCode::UNAUTHORIZED)
+    // 401 — point OAuth clients at the protected-resource metadata so they can
+    // discover the authorization server (RFC 9728).
+    let mut resp = StatusCode::UNAUTHORIZED.into_response();
+    if let Some(o) = &state.oauth {
+        let val = format!(
+            "Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource\"",
+            o.issuer
+        );
+        if let Ok(hv) = HeaderValue::from_str(&val) {
+            resp.headers_mut().insert(header::WWW_AUTHENTICATE, hv);
+        }
+    }
+    resp
 }
