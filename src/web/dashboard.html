@@ -9,7 +9,7 @@
 :root{
   --blue:#0075ff; --blue2:#2152ff; --cyan:#21d4fd; --violet:#582cff;
   --green:#01b574; --red:#ee5d50; --amber:#f7b924;
-  --ink:#ffffff; --ink2:#a0aec0; --ink3:#7079a3;
+  --ink:#ffffff; --ink2:#a0aec0; --ink3:#9aa3c7;
   --card:linear-gradient(127deg,rgba(6,11,40,.94) 19%,rgba(10,14,35,.49) 77%);
   --card-line:rgba(255,255,255,.08);
   --font:"DejaVu Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -40,22 +40,25 @@ a{color:inherit;text-decoration:none}
 .sidebar hr{border:0;border-top:1px solid var(--card-line);margin:14px 4px}
 .sect{font-size:11px;letter-spacing:.08em;color:var(--ink3);text-transform:uppercase;padding:10px 10px 6px;font-weight:700}
 .nav{display:flex;align-items:center;gap:12px;padding:10px 10px;border-radius:14px;color:var(--ink2);
-  font-size:13.5px;font-weight:600;cursor:pointer;transition:background .2s,color .2s}
+  font:600 13.5px var(--font);transition:background .2s,color .2s;width:100%;text-align:left;
+  background:transparent;border:0}
+button.nav{cursor:pointer}
 .nav .ic{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;flex:none;
   background:rgba(255,255,255,.06);color:var(--ink2);transition:all .2s}
-.nav:hover{color:#fff}
+button.nav:hover{color:#fff}
+.nav:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 .nav.active{background:var(--card);border:1px solid var(--card-line);color:#fff}
 .nav.active .ic{background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff;box-shadow:0 6px 16px rgba(0,117,255,.45)}
 .help{margin-top:auto;border-radius:16px;padding:16px;color:#fff;position:relative;overflow:hidden;
   background:radial-gradient(120% 120% at 80% 0%,var(--violet),var(--blue2) 60%,#0a1140);}
 .help b{display:block;font-size:13px;margin-bottom:2px}
-.help p{margin:0 0 10px;font-size:12px;color:rgba(255,255,255,.8)}
+.help p{margin:0 0 10px;font-size:12px;color:rgba(255,255,255,.86)}
 .help a{display:inline-block;font-size:11px;font-weight:700;background:rgba(255,255,255,.12);
   padding:7px 10px;border-radius:9px}
 
 /* ---------------- main ---------------- */
 .main{padding:20px 26px 60px;min-width:0}
-.topbar{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.topbar{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
 .crumb{color:var(--ink3);font-size:12px}
 .crumb b{color:#fff}
 .h1{font-size:18px;font-weight:700}
@@ -64,16 +67,20 @@ a{color:inherit;text-decoration:none}
 .verdict .dot{width:9px;height:9px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor}
 .verdict.ok{color:var(--green)} .verdict.warn{color:var(--amber)} .verdict.crit{color:var(--red)}
 .verdict.crit .dot{animation:pulse 1.8s infinite}
+@media (prefers-reduced-motion: reduce){.verdict.crit .dot{animation:none}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .spacer{margin-left:auto}
 .updated{color:var(--ink3);font-size:12px;font-family:var(--mono)}
 .updated .lv{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);
   box-shadow:0 0 8px var(--green);margin-right:6px;vertical-align:middle}
 .stale .updated .lv{background:var(--amber);box-shadow:0 0 8px var(--amber)}
-.iconbtn{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;color:var(--ink2);
-  background:var(--card);border:1px solid var(--card-line);cursor:pointer;font-size:15px}
-.iconbtn:hover{color:#fff}
 .stale .main{opacity:.7;transition:opacity .3s}
+
+/* degraded banner */
+.banner{display:none;margin-bottom:18px;padding:13px 16px;border-radius:14px;font-size:13px;
+  border:1px solid rgba(238,93,80,.4);background:rgba(238,93,80,.12);color:#ffb9b1}
+.banner.on{display:block}
+.banner b{color:#fff}
 
 /* ---------------- cards / grid ---------------- */
 .card{background:var(--card);border:1px solid var(--card-line);border-radius:20px;
@@ -89,8 +96,7 @@ a{color:inherit;text-decoration:none}
 .stat{display:flex;align-items:center;justify-content:space-between;padding:18px 20px}
 .stat .lbl{font-size:12px;color:var(--ink2);font-weight:600;margin-bottom:6px}
 .stat .v{font-size:24px;font-weight:700;letter-spacing:-.01em}
-.stat .v .d{font-size:13px;font-weight:700;margin-left:7px}
-.d.up{color:var(--green)} .d.down{color:var(--red)} .d.warn{color:var(--amber)}
+.stat .v .d{font-size:13px;font-weight:700;margin-left:7px;color:var(--ink2)}
 .stat .ic{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;flex:none;
   background:linear-gradient(135deg,var(--blue),var(--blue2));box-shadow:0 8px 22px rgba(0,117,255,.45);color:#fff}
 
@@ -121,10 +127,11 @@ a{color:inherit;text-decoration:none}
 /* charts */
 .chartcard{padding:20px 22px}
 .chartcard canvas{width:100%;display:block}
-.chead{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
+.chead{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;gap:10px;flex-wrap:wrap}
 .rtabs{display:flex;gap:2px;background:rgba(255,255,255,.05);padding:3px;border-radius:11px;border:1px solid var(--card-line)}
 .rtab{font:700 11px var(--font);color:var(--ink2);background:transparent;border:0;padding:5px 10px;border-radius:8px;cursor:pointer;letter-spacing:.03em}
 .rtab:hover{color:#fff}
+.rtab:focus-visible{outline:2px solid var(--cyan);outline-offset:1px}
 .rtab.on{background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff;box-shadow:0 4px 12px rgba(0,117,255,.4)}
 .legend{display:flex;gap:16px;margin-top:6px;font-size:12px;color:var(--ink2)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
@@ -136,13 +143,14 @@ a{color:inherit;text-decoration:none}
 /* table */
 .tablecard{margin-top:20px;padding:6px 4px 4px}
 .tablecard .pad{padding:16px 20px 4px}
+.tablewrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;color:var(--ink3);font-size:11px;letter-spacing:.05em;text-transform:uppercase;
+th{text-align:left;color:var(--ink3);font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;
   font-weight:700;padding:10px 20px;border-bottom:1px solid var(--card-line)}
 th.r,td.r{text-align:right}
 td{padding:12px 20px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
 tbody tr:last-child td{border-bottom:0}
-.cname{font-weight:700}.cimg{color:var(--ink3);font-family:var(--mono);font-size:11px}
+.cname{font-weight:700}.cimg{color:var(--ink3);font-family:var(--mono);font-size:11.5px}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600}
 .pill .dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
 .pill.ok{color:var(--green)}.pill.warn{color:var(--amber)}.pill.crit{color:var(--red)}.pill.idle{color:var(--ink3)}
@@ -155,17 +163,20 @@ tbody tr:last-child td{border-bottom:0}
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="logo"><span class="mk"><svg width="17" height="17" viewBox="0 0 96 96" fill="none"><path d="M8 52 H32 L42 24 L54 76 L62 56 H73" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="80" cy="56" r="5.5" fill="#fff"/></svg></span>vitals</div>
-    <div class="nav active"><span class="ic">▦</span>Dashboard</div>
-    <div class="nav" onclick="scrollTo(0,document.body.scrollHeight)"><span class="ic">▤</span>Containers</div>
-    <div class="nav"><span class="ic">≣</span>Logs</div>
-    <div class="nav"><span class="ic">◈</span>Alerts</div>
+    <div class="logo"><span class="mk"><svg width="17" height="17" viewBox="0 0 96 96" fill="none" aria-hidden="true"><path d="M8 52 H32 L42 24 L54 76 L62 56 H73" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="80" cy="56" r="5.5" fill="#fff"/></svg></span>vitals</div>
+    <nav aria-label="Sections">
+      <div class="nav active" aria-current="page"><span class="ic" aria-hidden="true">▦</span>Dashboard</div>
+      <button type="button" class="nav" id="nav-containers"><span class="ic" aria-hidden="true">▤</span>Containers</button>
+    </nav>
     <hr>
     <div class="sect">Account</div>
-    <a class="nav" href="/logout"><span class="ic">⎋</span>Sign out</a>
+    <!-- POST: a GET sign-out can be triggered by any cross-site navigation. -->
+    <form method="post" action="/logout">
+      <button type="submit" class="nav"><span class="ic" aria-hidden="true">⎋</span>Sign out</button>
+    </form>
     <div class="help">
       <b>Self-hosted.</b><p>Your box, your data. vitals watches it all.</p>
-      <a href="https://github.com/mich312/vm-vitals" target="_blank">GITHUB</a>
+      <a href="https://github.com/mich312/vm-vitals" target="_blank" rel="noopener noreferrer">GITHUB</a>
     </div>
   </aside>
 
@@ -176,9 +187,11 @@ tbody tr:last-child td{border-bottom:0}
         <div class="h1" id="host">—</div>
       </div>
       <span class="spacer"></span>
-      <span class="verdict ok" id="verdict"><span class="dot"></span><span id="vtxt">checking…</span></span>
-      <span class="updated" id="updated"><span class="lv"></span>connecting…</span>
+      <span class="verdict ok" id="verdict" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="vtxt">checking…</span></span>
+      <span class="updated" id="updated"><span class="lv" aria-hidden="true"></span><span id="uptxt">connecting…</span></span>
     </div>
+
+    <div class="banner" id="banner" role="status"></div>
 
     <div class="grid stats" id="stats"></div>
 
@@ -200,22 +213,22 @@ tbody tr:last-child td{border-bottom:0}
     <div class="grid row-2">
       <div class="card chartcard">
         <div class="chead">
-          <div><h3>Host overview</h3><div class="cap"><b id="ov-cap">live</b> · CPU &amp; memory</div></div>
-          <div class="rtabs">
-            <button class="rtab on" data-r="LIVE">LIVE</button>
-            <button class="rtab" data-r="1H">1H</button>
-            <button class="rtab" data-r="6H">6H</button>
-            <button class="rtab" data-r="24H">24H</button>
-            <button class="rtab" data-r="7D">7D</button>
+          <div><h3 id="ov-h">Host overview</h3><div class="cap"><b id="ov-cap">live</b> · CPU &amp; memory</div></div>
+          <div class="rtabs" role="tablist" aria-labelledby="ov-h">
+            <button class="rtab on" role="tab" aria-selected="true" data-r="LIVE">LIVE</button>
+            <button class="rtab" role="tab" aria-selected="false" data-r="1H">1H</button>
+            <button class="rtab" role="tab" aria-selected="false" data-r="6H">6H</button>
+            <button class="rtab" role="tab" aria-selected="false" data-r="24H">24H</button>
+            <button class="rtab" role="tab" aria-selected="false" data-r="7D">7D</button>
           </div>
         </div>
-        <canvas id="area" height="220"></canvas>
-        <div class="legend"><span><i style="background:var(--cyan)"></i>CPU %</span><span><i style="background:var(--blue)"></i>Memory %</span></div>
+        <canvas id="area" height="220" role="img" aria-label="Host CPU and memory over time"></canvas>
+        <div class="legend"><span><i style="background:var(--cyan)" aria-hidden="true"></i>CPU %</span><span><i style="background:var(--blue)" aria-hidden="true"></i>Memory %</span></div>
       </div>
       <div class="card chartcard">
         <h3>Container CPU</h3>
         <div class="cap">by container · live</div>
-        <canvas id="bars" height="150"></canvas>
+        <canvas id="bars" height="150" role="img" aria-label="CPU usage per container"></canvas>
         <div class="tiles">
           <div class="tile"><div class="tl">Running</div><div class="tv" id="t-run">—</div></div>
           <div class="tile"><div class="tl">Total mem</div><div class="tv" id="t-mem">—</div></div>
@@ -224,20 +237,36 @@ tbody tr:last-child td{border-bottom:0}
     </div>
 
     <div class="card tablecard">
-      <div class="pad"><h3>Containers</h3></div>
-      <table>
-        <thead><tr><th>Container</th><th>State</th><th>Health</th><th class="r">CPU</th><th>Memory</th><th class="r">Restarts</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="6" class="dim" style="padding:20px">Loading…</td></tr></tbody>
-      </table>
+      <div class="pad"><h3 id="ctr-h">Containers</h3></div>
+      <div class="tablewrap">
+        <table aria-labelledby="ctr-h">
+          <thead><tr><th>Container</th><th>State</th><th>Health</th><th class="r">CPU</th><th>Memory</th><th class="r">Restarts</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="6" class="dim" style="padding:20px">Loading…</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </main>
 </div>
 
 <script>
 const $=id=>document.getElementById(id), clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
-function rel(s){if(s<60)return s+'s';const m=~~(s/60);if(m<60)return m+'m';const h=~~(m/60);if(h<24)return h+'h '+(m%60)+'m';const d=~~(h/24);return d+'d '+(h%24)+'h';}
+
+/* Everything below flows from the Docker daemon. Docker validates container
+   names and image refs today, but this page must not depend on a *different*
+   project's validation to stay safe. */
+const ESCAPES={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>ESCAPES[c]);
+
+function rel(s){s=Math.max(0,s|0);if(s<60)return s+'s';const m=~~(s/60);if(m<60)return m+'m';const h=~~(m/60);if(h<24)return h+'h '+(m%60)+'m';const d=~~(h/24);return d+'d '+(h%24)+'h';}
 function lvl(v,w,c){return v>=c?'crit':v>=w?'warn':'ok';}
-const COL={crit:'var(--red)',warn:'var(--amber)',ok:'var(--green)'};
+
+/* CSS custom properties are fixed for the page's lifetime — reading them inside
+   a draw loop forces a style recalc on every frame for no reason. */
+const CSSVAR=(()=>{const g=getComputedStyle(document.documentElement);
+  const v=n=>g.getPropertyValue(n).trim()||'#888';
+  return {cyan:v('--cyan'),blue:v('--blue'),red:v('--red'),ink3:v('--ink3')};})();
+
+const COLLATOR=new Intl.Collator(undefined,{numeric:true,sensitivity:'base'});
 
 /* ring buffers */
 const CAP=90, rings={};
@@ -245,16 +274,16 @@ const push=(k,v)=>{(rings[k]??=[]).push(v);if(rings[k].length>CAP)rings[k].shift
 
 /* ---------- stat cards ---------- */
 const ICONS={cpu:'▤',memory:'▥',disk:'▦',load:'◴'};
-function stat(k,label,val,delta,dcls){
-  return `<div class="card stat"><div><div class="lbl">${label}</div>
-    <div class="v">${val}${delta?`<span class="d ${dcls}">${delta}</span>`:''}</div></div>
-    <div class="ic">${ICONS[k]}</div></div>`;
+function stat(k,label,val,delta){
+  return `<div class="card stat"><div><div class="lbl">${esc(label)}</div>
+    <div class="v">${esc(val)}${delta?`<span class="d">${esc(delta)}</span>`:''}</div></div>
+    <div class="ic" aria-hidden="true">${ICONS[k]}</div></div>`;
 }
 
 /* ---------- radial gauge ---------- */
 function gaugeSVG(id,grad){
   return `<h3 style="align-self:flex-start">${id==='g-cpu'?'CPU load':'Memory'}</h3>
-  <svg viewBox="0 0 180 120">
+  <svg viewBox="0 0 180 120" aria-hidden="true">
     <defs><linearGradient id="grad-${id}" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="${grad[0]}"/><stop offset="1" stop-color="${grad[1]}"/></linearGradient>
       <filter id="glow-${id}" x="-40%" y="-40%" width="180%" height="180%">
@@ -268,24 +297,36 @@ function gaugeSVG(id,grad){
   <div class="scale"><span>0</span><span>100%</span></div>`;
 }
 function setGauge(id,pct,sub){
-  const half=pct/100*100; // full semicircle path = pathLength 100 for 180°... arc is 180° so 0-100 maps directly
-  const arc=$('arc-'+id); if(arc){arc.setAttribute('stroke-dasharray',clamp(half,0,100)+' 100');}
+  const arc=$('arc-'+id); if(arc){arc.setAttribute('stroke-dasharray',clamp(pct,0,100)+' 100');}
   $('gv-'+id).textContent=Math.round(pct)+'%'; $('gl-'+id).textContent=sub||'';
+}
+
+/* ---------- canvas sizing ----------
+   canvas.width is an integer attribute, so a fractional devicePixelRatio (125%,
+   150%, 175% display scaling) truncates on assignment and the naive
+   `width !== w*dpr` guard is true forever — reallocating both backing stores on
+   every single draw. Round before comparing. */
+function fit(cv,cssW,cssH){
+  const dpr=Math.min(devicePixelRatio||1,2);
+  const w=Math.round(cssW*dpr), h=Math.round(cssH*dpr);
+  if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h;}
+  const g=cv.getContext('2d');
+  g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,cssW,cssH);
+  return g;
 }
 
 /* ---------- area chart (cpu + mem history, LIVE or a fetched range) ---------- */
 const chart={mode:'LIVE', cpu:[], mem:[], t:null};
 function drawArea(){
-  const cv=$('area'), w=cv.clientWidth||700, h=220, dpr=Math.min(devicePixelRatio||1,2);
-  if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr;} const g=cv.getContext('2d');
-  g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  const cv=$('area'), w=cv.clientWidth||700, h=220;
+  const g=fit(cv,w,h);
   const pad={l:34,r:8,t:10,b:22};
-  g.strokeStyle='rgba(255,255,255,.06)'; g.fillStyle='#7079a3'; g.font='10px sans-serif'; g.textAlign='left';
+  g.strokeStyle='rgba(255,255,255,.06)'; g.fillStyle=CSSVAR.ink3; g.font='11px sans-serif'; g.textAlign='left';
   for(let i=0;i<=5;i++){const y=pad.t+(h-pad.t-pad.b)*i/5; g.beginPath();g.moveTo(pad.l,y);g.lineTo(w-pad.r,y);g.stroke();
     g.fillText(100-i*20, 6, y+3);}
-  for(const [v,c] of [[chart.cpu,'--cyan'],[chart.mem,'--blue']]){
+  for(const [v,col] of [[chart.cpu,CSSVAR.cyan],[chart.mem,CSSVAR.blue]]){
     if(!v||v.length<2)continue; const n=v.length;
-    const col=getComputedStyle(document.documentElement).getPropertyValue(c).trim();
     const x=i=>pad.l+(i/(n-1))*(w-pad.l-pad.r), y=val=>pad.t+(1-clamp(val,0,100)/100)*(h-pad.t-pad.b);
     g.beginPath();g.moveTo(x(0),h-pad.b);for(let i=0;i<n;i++)g.lineTo(x(i),y(v[i]));g.lineTo(x(n-1),h-pad.b);g.closePath();
     const grd=g.createLinearGradient(0,pad.t,0,h-pad.b);grd.addColorStop(0,col+'55');grd.addColorStop(1,col+'00');g.fillStyle=grd;g.fill();
@@ -293,7 +334,7 @@ function drawArea(){
     g.shadowColor=col;g.shadowBlur=10;g.stroke();g.shadowBlur=0;
   }
   if(chart.t&&chart.t.length>1){
-    g.fillStyle='#7079a3';g.textAlign='center';const n=chart.t.length;
+    g.fillStyle=CSSVAR.ink3;g.textAlign='center';const n=chart.t.length;
     for(let k=0;k<=4;k++){const i=Math.round((n-1)*k/4);const xx=pad.l+(i/(n-1))*(w-pad.l-pad.r);
       const dt=new Date(chart.t[i]*1000);
       const lbl=chart.mode==='7D'?(dt.getMonth()+1)+'/'+dt.getDate():String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');
@@ -301,39 +342,79 @@ function drawArea(){
     g.textAlign='left';
   }
 }
+
+/* Range switching: the tab highlight updates synchronously but the data arrives
+   later, so without a sequence guard the *last resolved* fetch wins rather than
+   the last clicked — leaving 24H data under a 7D label for up to a minute. */
+let rangeSeq=0, rangeAC=null;
+const SPANS={'1H':3600,'6H':21600,'24H':86400,'7D':604800};
+
 async function setRange(mode){
+  const seq=++rangeSeq;
+  if(rangeAC){rangeAC.abort();}
   chart.mode=mode;
-  document.querySelectorAll('.rtab').forEach(b=>b.classList.toggle('on',b.dataset.r===mode));
+  document.querySelectorAll('.rtab').forEach(b=>{
+    const on=b.dataset.r===mode;
+    b.classList.toggle('on',on); b.setAttribute('aria-selected',on?'true':'false');
+  });
   $('ov-cap').textContent=mode==='LIVE'?'live':mode;
-  if(mode==='LIVE'){chart.t=null;return;}
-  const spans={'1H':3600,'6H':21600,'24H':86400,'7D':604800};
-  const to=Math.floor(Date.now()/1000),from=to-spans[mode];
+
+  if(mode==='LIVE'){
+    chart.cpu=rings['host.cpu']??[]; chart.mem=rings['host.mem']??[]; chart.t=null;
+    drawArea(); return;
+  }
+
+  const ac=new AbortController(); rangeAC=ac;
+  const to=Math.floor(Date.now()/1000), from=to-SPANS[mode];
   try{
     const [cpu,mem]=await Promise.all([
-      fetch(`/api/series?metric=host.cpu&from=${from}&to=${to}`).then(r=>r.json()),
-      fetch(`/api/series?metric=host.mem&from=${from}&to=${to}`).then(r=>r.json())]);
+      fetchSeries('host.cpu',from,to,ac.signal),
+      fetchSeries('host.mem',from,to,ac.signal)]);
+    if(seq!==rangeSeq||chart.mode!==mode)return;   // superseded
     chart.cpu=cpu.avg; chart.mem=mem.avg; chart.t=cpu.t; drawArea();
-  }catch(e){}
+    $('ov-cap').textContent=mode+(cpu.t.length?'':' · no data');
+  }catch(e){
+    if(e.name==='AbortError')return;
+    console.warn('range load failed',e);
+    if(seq===rangeSeq)$('ov-cap').textContent=mode+' · unavailable';
+  }
 }
+
+async function fetchSeries(metric,from,to,signal){
+  const r=await fetch(`/api/series?metric=${encodeURIComponent(metric)}&from=${from}&to=${to}`,
+    {signal,cache:'no-store'});
+  // The range path is behind the same auth as the poll path; without this an
+  // expired session silently freezes the chart on stale data.
+  if(r.status===401){location.href='/';throw new Error('unauthorized');}
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  return r.json();
+}
+
 document.querySelectorAll('.rtab').forEach(b=>b.onclick=()=>setRange(b.dataset.r));
-setInterval(()=>{if(chart.mode!=='LIVE')setRange(chart.mode);},60000);
+setInterval(()=>{if(chart.mode!=='LIVE'&&!document.hidden)setRange(chart.mode);},60000);
+$('nav-containers').onclick=()=>document.getElementById('ctr-h').scrollIntoView({behavior:'smooth'});
 
 /* ---------- bar chart (per-container cpu) ---------- */
 let barData=[];
 function drawBars(){
-  const cv=$('bars'), w=cv.clientWidth||300, h=150, dpr=Math.min(devicePixelRatio||1,2);
-  if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr;} const g=cv.getContext('2d');
-  g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  const cv=$('bars'), w=cv.clientWidth||300, h=150;
+  const g=fit(cv,w,h);
   const d=barData.slice(0,10); if(!d.length)return;
   const max=Math.max(5,...d.map(x=>x.cpu)); const bw=(w-8)/d.length, pb=18;
   d.forEach((x,i)=>{
     const bh=(x.cpu/max)*(h-pb-8), bx=4+i*bw+bw*0.22, by=h-pb-bh, ww=bw*0.56;
     const grd=g.createLinearGradient(0,by,0,h-pb);grd.addColorStop(0,'#fff');grd.addColorStop(1,'rgba(255,255,255,.35)');
-    g.fillStyle= x.cpu>75?getComputedStyle(document.documentElement).getPropertyValue('--red'): grd;
+    g.fillStyle= x.cpu>75?CSSVAR.red:grd;
     rr(g,bx,by,ww,Math.max(bh,2),3);g.fill();
-    g.fillStyle='#7079a3';g.font='9px sans-serif';g.textAlign='center';
-    g.fillText(x.name.replace(/^discord-/,'').slice(0,6), bx+ww/2, h-6);
+    g.fillStyle=CSSVAR.ink3;g.font='10px sans-serif';g.textAlign='center';
+    g.fillText(ellipsize(g,x.name,bw*0.95), bx+ww/2, h-6);
   });
+}
+function ellipsize(g,s,maxW){
+  if(g.measureText(s).width<=maxW)return s;
+  let t=s;
+  while(t.length>1&&g.measureText(t+'…').width>maxW)t=t.slice(0,-1);
+  return t+'…';
 }
 function rr(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
 
@@ -346,69 +427,144 @@ const RANK={crit:0,warn:1,idle:2,ok:3};
 
 /* ---------- render ---------- */
 function render(d){
-  const h=d.host, cs=d.containers;
+  const h=d.host, cs=d.containers||[];
+  const sevOf=new Map(cs.map(c=>[c,sev(c)]));
   $('host').textContent=h.hostname;
+
   const cpuL=lvl(h.cpu_pct,75,90),memL=lvl(h.mem_used_pct,80,92),diskL=lvl(h.disk_used_pct,80,90);
-  // stat cards
   $('stats').innerHTML=
-    stat('cpu','CPU load', h.cpu_pct.toFixed(1)+'%','', '')+
-    stat('memory','Memory', h.mem_used_pct.toFixed(0)+'%', ((h.mem_total_mb-h.mem_avail_mb)/1000).toFixed(1)+'G', 'up')+
-    stat('disk','Disk', h.disk_used_pct.toFixed(0)+'%', h.disk_avail_gb.toFixed(0)+'G free','up')+
-    stat('load','Load avg', h.load1.toFixed(2),'', '');
-  // summary
+    stat('cpu','CPU load', h.cpu_pct.toFixed(1)+'%','')+
+    stat('memory','Memory', h.mem_used_pct.toFixed(0)+'%', ((h.mem_total_mb-h.mem_avail_mb)/1000).toFixed(1)+'G used')+
+    stat('disk','Disk', h.disk_used_pct.toFixed(0)+'%', h.disk_avail_gb.toFixed(0)+'G free')+
+    stat('load','Load avg', h.load1.toFixed(2),'');
+
   $('s-host').textContent=h.hostname; $('s-up').textContent=rel(h.uptime_secs);
   $('s-ctr').textContent=cs.filter(c=>c.state==='running').length+'/'+cs.length;
   $('s-mem').textContent=(h.mem_total_mb/1000).toFixed(0)+'G';
-  // gauges
+
   setGauge('g-cpu',h.cpu_pct, h.load1.toFixed(2)+' load');
   setGauge('g-mem',h.mem_used_pct, (h.mem_avail_mb/1000).toFixed(1)+'G free');
-  // rings + charts
+
   push('host.cpu',h.cpu_pct); push('host.mem',h.mem_used_pct);
   if(chart.mode==='LIVE'){chart.cpu=rings['host.cpu'];chart.mem=rings['host.mem'];chart.t=null;drawArea();}
   barData=cs.filter(c=>c.cpu_pct!=null).map(c=>({name:c.name,cpu:c.cpu_pct})).sort((a,b)=>b.cpu-a.cpu); drawBars();
   $('t-run').textContent=cs.filter(c=>c.state==='running').length;
   $('t-mem').textContent=(cs.reduce((s,c)=>s+(c.mem_mb||0),0)/1000).toFixed(1)+' GB';
-  // verdict
-  let crit=0,warn=0; for(const v of [cpuL,memL,diskL]){if(v==='crit')crit++;else if(v==='warn')warn++;}
-  for(const c of cs){const s=sev(c);if(s==='crit')crit++;else if(s==='warn')warn++;}
+
+  // A blind collector must never read as a healthy one: an unreachable Docker
+  // daemon is a critical condition, not an empty container list.
+  const blind=!!d.docker_error;
+  $('banner').classList.toggle('on',blind);
+  if(blind)$('banner').innerHTML='<b>Docker unreachable.</b> Container health is '+
+    'not being monitored — this page cannot tell you whether your services are up. '+
+    '<span class="dim">'+esc(d.docker_error)+'</span>';
+
+  let crit=blind?1:0,warn=0;
+  for(const v of [cpuL,memL,diskL]){if(v==='crit')crit++;else if(v==='warn')warn++;}
+  for(const c of cs){const s=sevOf.get(c);if(s==='crit')crit++;else if(s==='warn')warn++;}
   const worst=crit?'crit':warn?'warn':'ok';
   $('verdict').className='verdict '+worst;
-  $('vtxt').textContent=worst==='ok'?'all systems healthy':(crit?crit+' critical':'')+(crit&&warn?' · ':'')+(warn?warn+' degraded':'');
-  const down=cs.filter(c=>sev(c)==='crit');
-  $('s-sent').innerHTML=worst==='ok'?"Everything's nominal. Every service is up and within limits."
-    :down.length?'Attention: <span class="c">'+down.map(c=>c.name).join(', ')+'</span> '+(down.length>1?'need':'needs')+' a look.'
+  $('vtxt').textContent=blind?'docker unreachable'
+    :worst==='ok'?'all systems healthy'
+    :(crit?crit+' critical':'')+(crit&&warn?' · ':'')+(warn?warn+' degraded':'');
+
+  const down=cs.filter(c=>sevOf.get(c)==='crit');
+  $('s-sent').innerHTML=blind?'Cannot reach the Docker daemon — container state is unknown.'
+    :worst==='ok'?"Everything's nominal. Every service is up and within limits."
+    :down.length?'Attention: <span class="c">'+down.map(c=>esc(c.name)).join(', ')+'</span> '+(down.length>1?'need':'needs')+' a look.'
     :'<span class="w">'+(crit+warn)+'</span> signal'+((crit+warn)>1?'s':'')+' above threshold.';
-  // table
-  cs.sort((a,b)=>(RANK[sev(a)]-RANK[sev(b)])||a.name.localeCompare(b.name));
-  $('rows').innerHTML=cs.map(c=>{const s=sev(c),p=s==='idle'?'idle':s;
+
+  cs.sort((a,b)=>(RANK[sevOf.get(a)]-RANK[sevOf.get(b)])||COLLATOR.compare(a.name,b.name));
+  $('rows').innerHTML=cs.length?cs.map(c=>{const s=sevOf.get(c),p=s==='idle'?'idle':s;
     const mem=c.mem_mb!=null?(c.mem_mb>=1000?(c.mem_mb/1000).toFixed(1)+'G':c.mem_mb+'M'):'—';
     const memPct=c.mem_mb!=null&&c.mem_limit_mb?clamp(c.mem_mb/c.mem_limit_mb*100,0,100):null;
-    const cpu=c.cpu_pct!=null?c.cpu_pct.toFixed(1)+'%':'<span class="dim">—</span>';
-    const rc=c.restarts>0?`<span class="rst hot">↻ ${c.restarts}</span>`:'<span class="rst dim">0</span>';
-    return `<tr><td><div class="cname">${c.name}</div><div class="cimg">${c.image}</div></td>
-      <td><span class="pill ${p}"><span class="dot"></span>${c.state}</span></td>
-      <td>${c.health?`<span class="pill ${c.health==='healthy'?'ok':c.health==='unhealthy'?'crit':'warn'}">${c.health}</span>`:'<span class="dim">—</span>'}</td>
+    const cpu=c.cpu_pct!=null?esc(c.cpu_pct.toFixed(1)+'%'):'<span class="dim">—</span>';
+    // restarts is null when the inspect call failed — that is "unknown", and
+    // showing 0 would hide a crash loop behind a healthy-looking number.
+    const rc=c.restarts==null?'<span class="rst dim" title="inspect failed">?</span>'
+      :c.restarts>0?`<span class="rst hot">↻ ${esc(c.restarts)}</span>`:'<span class="rst dim">0</span>';
+    return `<tr><td><div class="cname">${esc(c.name)}</div><div class="cimg">${esc(c.image)}</div></td>
+      <td><span class="pill ${p}"><span class="dot" aria-hidden="true"></span>${esc(c.state)}</span></td>
+      <td>${c.health?`<span class="pill ${c.health==='healthy'?'ok':c.health==='unhealthy'?'crit':'warn'}">${esc(c.health)}</span>`:'<span class="dim">—</span>'}</td>
       <td class="r">${cpu}</td>
-      <td>${mem}${memPct!=null?`<span class="bar"><i style="width:${memPct}%"></i></span>`:''}</td>
-      <td class="r">${rc}</td></tr>`;}).join('');
+      <td>${esc(mem)}${memPct!=null?`<span class="bar"><i style="width:${Number(memPct).toFixed(2)}%"></i></span>`:''}</td>
+      <td class="r">${rc}</td></tr>`;}).join('')
+    :`<tr><td colspan="6" class="dim" style="padding:20px">${blind?'Container list unavailable.':'No containers.'}</td></tr>`;
 }
 
 /* ---------- gauges init ---------- */
 $('g-cpu').innerHTML=gaugeSVG('g-cpu',['#21d4fd','#2152ff']);
 $('g-mem').innerHTML=gaugeSVG('g-mem',['#582cff','#0075ff']);
 
-/* ---------- live loop ---------- */
-const CAD=2000,STALE=6000; let lastOk=0,backoff=CAD;
-async function poll(){const ac=new AbortController();const t=setTimeout(()=>ac.abort(),CAD);
-  try{const r=await fetch('/api/status',{signal:ac.signal});if(r.status===401){location.href='/';return;}
-    const d=await r.json();if(d)render(d);lastOk=Date.now();backoff=CAD;document.body.classList.remove('stale');}
-  catch(e){backoff=Math.min(backoff*1.6,20000);if(Date.now()-lastOk>STALE)document.body.classList.add('stale');}
-  finally{clearTimeout(t);setTimeout(poll,backoff);}}
-setInterval(()=>{const u=$('updated');if(!lastOk){u.innerHTML='<span class="lv"></span>connecting…';return;}
-  const s=~~((Date.now()-lastOk)/1000),st=document.body.classList.contains('stale');
-  u.innerHTML='<span class="lv"></span>'+(st?'reconnecting · ':'updated ')+rel(s)+(st?'':' ago');},1000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
-addEventListener('resize',()=>{drawArea();drawBars();});
+/* ---------- live loop ----------
+   Single-instance by construction: one timer handle, cleared before every
+   re-arm, plus an in-flight guard. Re-entering poll() from visibilitychange
+   without this starts a second self-scheduling chain that never terminates,
+   and every tab switch adds another. */
+const CAD=5000, REQ_TIMEOUT=8000;
+let timer=null, inflight=false, backoff=CAD, lastOk=0, lastTs=null, latest=null;
+
+function schedule(ms){clearTimeout(timer);timer=setTimeout(poll,ms);}
+
+async function poll(){
+  if(inflight)return;
+  inflight=true;
+  const ac=new AbortController();
+  const t=setTimeout(()=>ac.abort(),REQ_TIMEOUT);
+  let d, ok=false, gone=false;
+  try{
+    const r=await fetch('/api/status',{signal:ac.signal,cache:'no-store'});
+    if(r.status===401){gone=true;location.href='/';return;}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    d=await r.json(); ok=true; lastOk=Date.now(); backoff=CAD;
+  }catch(e){
+    console.warn('poll failed',e);
+    backoff=Math.min(backoff*1.6,20000);
+  }finally{
+    clearTimeout(t); inflight=false;
+    if(!gone&&!document.hidden)schedule(backoff);
+  }
+
+  // Rendering lives outside the network try: a render exception must not be
+  // misread as an outage, which would ramp the backoff and pin the UI at
+  // "reconnecting" while the server is perfectly healthy.
+  if(ok){
+    try{
+      if(d==null){latest=null;}
+      else if(d.ts!==lastTs){lastTs=d.ts;latest=d;render(d);}
+      else {latest=d;}
+    }catch(e){console.error('render failed',e);}
+  }
+  freshness();
+}
+
+/* Freshness is a property of the *data*, not of the socket. Keying it off a
+   successful fetch means a wedged collector renders as "updated 1s ago" over
+   frozen numbers — the exact failure this dashboard exists to surface. */
+function freshness(){
+  const u=$('uptxt');
+  if(!latest){
+    u.textContent=lastOk?'waiting for first collection…':'connecting…';
+    document.body.classList.toggle('stale',Date.now()-lastOk>REQ_TIMEOUT*2||!lastOk);
+    return;
+  }
+  const age=Math.max(0,Math.round(Date.now()/1000-latest.ts));
+  const stale=age>(latest.stale_after_secs||45)||(lastOk&&Date.now()-lastOk>REQ_TIMEOUT*2);
+  document.body.classList.toggle('stale',!!stale);
+  u.textContent=(stale?'stale · collected ':'updated ')+rel(age)+' ago';
+}
+setInterval(freshness,1000);
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){clearTimeout(timer);}
+  else {schedule(0);}
+});
+
+let rafPending=false;
+addEventListener('resize',()=>{
+  if(rafPending)return; rafPending=true;
+  requestAnimationFrame(()=>{rafPending=false;drawArea();drawBars();});
+});
 poll();
 </script>
 </body>

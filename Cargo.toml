@@ -2,7 +2,9 @@
 name = "vitals"
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.82"
+# Driven by webauthn-rs 0.5 (and the edition2024 crates in its tree).
+# Verified: 1.86 and below cannot build this, 1.88 builds and tests clean.
+rust-version = "1.88"
 description = "Know how your servers are doing — a small self-hosted host + Docker watchdog."
 license = "MIT"
 repository = "https://github.com/mich312/vm-vitals"
@@ -43,3 +45,8 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# Software authenticator, so the passkey ceremonies can be driven end-to-end in
+# tests.
+[dev-dependencies]
+webauthn-authenticator-rs = { version = "0.5", features = ["softpasskey"] }

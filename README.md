@@ -29,7 +29,8 @@ one thing that:
   container, on one page.
 - **keeps enough history** to see a trend, with simple graphs.
 - **streams container logs** in the browser, so you're not SSH-ing to `docker logs`.
-- **stays out of the way** — one static binary, a few MB of RAM, a few MB of DB.
+- **stays out of the way** — one static binary, tens of MB of RAM, and a
+  history DB sized to your container count (see Footprint).
 
 It runs as a **host service, not a container** — so if the Docker daemon itself
 wedges, vitals is still up and can tell you.
@@ -47,7 +48,7 @@ wedges, vitals is still up and can tell you.
   with recovery notices and flap-dampening; pluggable channels (Telegram, ntfy)
 - 💓 Heartbeat to a dead-man's-switch, so a dead monitor doesn't fail silently
 - 🔑 Passkey (WebAuthn) sign-in for the dashboard — no password to leak
-- 🪶 One static binary · runs as a host `systemd` service · < 25 MB RSS
+- 🪶 One static binary · runs as a host `systemd` service · see Footprint
 
 ## Quickstart
 
@@ -57,8 +58,16 @@ wedges, vitals is still up and can tell you.
 **Binary (recommended — host-native, survives Docker outages):**
 
 ```sh
-curl -fsSL https://github.com/mich312/vm-vitals/releases/latest/download/install.sh | sh
-sudo cp config.example.toml /etc/vitals/config.toml   # then edit it
+# Pin a version and verify the checksum — `| sh` on an unpinned `latest`
+# executes whatever that URL serves, and a truncated download runs a partial
+# script.
+VER=v0.1.0
+base=https://github.com/mich312/vm-vitals/releases/download/$VER
+curl -fsSLO $base/install.sh && curl -fsSLO $base/install.sh.sha256
+sha256sum -c install.sh.sha256 && sh ./install.sh
+
+sudo install -D -o root -g vitals -m 0640 config.example.toml /etc/vitals/config.toml
+sudo editor /etc/vitals/config.toml     # set rp_id/rp_origin or a token
 sudo systemctl enable --now vitals
 ```
 
@@ -66,15 +75,26 @@ sudo systemctl enable --now vitals
 
 ```sh
 docker run -d --name vitals \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v /proc:/host/proc:ro -v /:/host/root:ro \
+  --user 65532:$(getent group docker | cut -d: -f3) \
+  --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m \
+  --cap-drop=ALL --security-opt=no-new-privileges:true \
+  --pids-limit 64 --memory 128m \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -v ./config.toml:/etc/vitals/config.toml:ro \
   -v vitals-data:/var/lib/vitals \
   -p 127.0.0.1:9110:9110 ghcr.io/mich312/vitals:latest
 ```
 
-Then open the dashboard (put it behind your own TLS + auth, or use the built-in
-passkey login) and enroll a passkey on first run.
+Configure authentication before exposing it: set `web.rp_id` + `web.rp_origin`
+for passkey sign-in, or `web.token` for the API. vitals refuses to start if it
+would serve a non-loopback address with neither.
+
+On first start it prints a one-time enrolment code to the log
+(`journalctl -u vitals`). Open the dashboard, enter that code, and enroll your
+passkey — reaching the URL alone is not enough to claim the account.
+
+Host disk metrics are only meaningful in the host-binary deployment; in a
+container `sysinfo` measures the container's own filesystem.
 
 ## Configuration
 
@@ -94,6 +114,19 @@ heartbeat_url = "https://hc-ping.com/…" # dead-man's-switch
 name = "my-app"; url = "https://app.example.com/"; expect = 200
 ```
 
+## Footprint
+
+Measured, not aspirational:
+
+| | RSS | history DB @ 180d |
+| --- | --- | --- |
+| idle, no containers | ~10 MB | ~1 MB |
+| ~5 containers | ~16 MB | ~17 MB |
+| ~50 containers | ~24 MB | ~120 MB |
+
+Retention (48h raw · 30d 5-min · 180d hourly) is what drives the DB size; shorten
+it in `[retention]` if you'd rather trade history for disk.
+
 ## How it compares
 
 | | vitals | Netdata | Beszel | Prometheus + Grafana |
@@ -111,10 +144,16 @@ for the bigger tools — vitals won't try to be them.
 
 ## Security
 
-- The Docker socket is mounted **read-only**; access to it is effectively root,
-  so vitals never exposes it and the dashboard is authenticated.
+- **Docker socket access is equivalent to root on the host.** Mounting it `:ro`
+  does not change that — `:ro` gates filesystem writes, not socket traffic, and
+  the Engine API behind it stays read-write. vitals only ever issues read calls,
+  but that is its own restraint, not an enforced boundary. Point `[docker]
+  socket` at a read-only proxy to make it one.
+- **vitals fails closed**: it will not start unauthenticated on a non-loopback
+  bind, and aborts rather than degrading to "open" if passkey init fails.
 - The dashboard binds to loopback; front it with TLS (passkeys require HTTPS).
-- No secrets are stored in the history DB.
+- The history DB holds no credentials, but metric names include your **container
+  names**, kept for 180 days — treat the file as sensitive.
 
 See [docs/security.md](docs/security.md).
 

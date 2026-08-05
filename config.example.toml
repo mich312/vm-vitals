@@ -1,6 +1,11 @@
 # vitals — example configuration. Copy to /etc/vitals/config.toml and edit.
-# Nothing here is required to be secret; secrets come from the environment
-# (see `bot_token_env` etc.) or a systemd EnvironmentFile, never this file.
+#
+#   sudo install -D -o root -g vitals -m 0640 config.example.toml /etc/vitals/config.toml
+#
+# Use that `install` line rather than `cp`: this file can hold the API token and
+# the ntfy topic URL (which is itself a credential — anyone holding it can read
+# your alert stream and publish forged alerts), and a plain `cp` leaves it
+# world-readable. Higher-value secrets belong in the systemd EnvironmentFile.
 
 # How often to collect + evaluate.
 interval = "15s"
@@ -8,9 +13,45 @@ interval = "15s"
 [web]
 # Bind to loopback; front it with your TLS proxy (passkeys need HTTPS).
 bind = "127.0.0.1:9110"
-# When true, vitals skips its own auth and trusts an upstream proxy to have
-# authenticated the request. Leave false to use the built-in passkey login.
-trust_proxy_auth = false
+
+# ---------------------------------------------------------------------------
+# AUTHENTICATION — configure at least one of the two blocks below.
+#
+# vitals refuses to start if it would serve a non-loopback address with neither
+# configured. On loopback it starts with a warning, for local development.
+# ---------------------------------------------------------------------------
+
+# 1) Passkey (WebAuthn) sign-in for the browser dashboard. Both values are
+#    required together. rp_id is the dashboard's hostname; rp_origin is its
+#    full HTTPS origin. Passkeys are bound to these, so set them before you
+#    enrol — changing them later invalidates every enrolled credential.
+# rp_id     = "status.example.com"
+# rp_origin = "https://status.example.com"
+
+# 2) Bearer token for /api/* and MCP clients. Minimum 16 characters; generate
+#    with `openssl rand -hex 32`. Prefer $VITALS_TOKEN via the EnvironmentFile
+#    so the secret is not in this file at all.
+# token = "…"
+
+# Where enrolled passkeys and the history DB live.
+data_dir = "/var/lib/vitals"
+
+[docker]
+# Path to the Docker API socket, or a tcp://host:port endpoint.
+#
+# Access to the real socket is equivalent to root on this host — see
+# docs/security.md. To reduce that, run a read-only socket proxy and point
+# vitals at it; vitals only ever issues GETs (list, inspect, stats, logs).
+socket = "/var/run/docker.sock"
+# socket = "tcp://127.0.0.1:2375"   # e.g. a docker-socket-proxy with POST=0
+
+# ---------------------------------------------------------------------------
+# The sections below describe milestones that are NOT implemented yet (M1+).
+# They are accepted and ignored today, so you can write them ahead of time.
+# Unknown keys inside [web] or [docker] are a hard error, on purpose: a
+# silently-ignored key in an implemented section reads as a security control
+# that took effect when it did not.
+# ---------------------------------------------------------------------------
 
 [alert]
 channel = "ntfy"                 # "ntfy" | "telegram"
@@ -19,7 +60,7 @@ reminder = "6h"                  # re-notify interval while still firing
 # Dead-man's-switch: vitals pings this every tick; if vitals dies, IT alarms.
 heartbeat_url = "https://hc-ping.com/your-uuid"
 
-# ntfy: the script POSTs alerts to this topic.
+# ntfy: the script POSTs alerts to this topic. Treat this URL as a secret.
 ntfy = { url = "https://ntfy.sh/your-private-topic", priority = "high" }
 
 # telegram: token comes from the environment, not this file.
@@ -36,11 +77,6 @@ container_cpu_warn = 85          # sustained, 10-min avg
 cert_days_warn = 14
 cert_days_crit = 3
 
-[docker]
-socket = "/var/run/docker.sock"
-# Watch everything, or narrow to specific compose projects:
-# projects = ["my-stack"]
-
 [retention]
 raw = "48h"                      # 15s samples
 five_min = "30d"
@@ -53,8 +89,3 @@ hour = "180d"
 name = "example"
 url = "https://app.example.com/"
 expect = 200
-
-# [[endpoint]]
-# name = "api"
-# url = "https://api.example.com/health"
-# expect = 200

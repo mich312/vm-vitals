@@ -5,11 +5,22 @@
 //!
 //! The programmatic API (/api/*, MCP) keeps its bearer token — this is only the
 //! browser session layer.
+//!
+//! Two invariants worth stating, because getting either wrong is a full auth
+//! bypass:
+//!
+//! 1. **Authorization is re-checked at `finish`, not just `start`.** Otherwise a
+//!    ceremony begun during the pre-bootstrap window can be parked and redeemed
+//!    after an admin exists, silently enrolling a second credential.
+//! 2. **Ceremony and session expiry are absolute (`SystemTime`), not monotonic.**
+//!    `Instant` stops advancing while a VM is suspended, which would silently
+//!    extend every TTL across a snapshot/resume.
 
 use std::collections::HashMap;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use axum::{
@@ -22,11 +33,33 @@ use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::*;
 
-const SESSION_COOKIE: &str = "v_session";
-const REG_COOKIE: &str = "v_reg";
-const AUTH_COOKIE: &str = "v_auth";
+// `__Host-` forces the browser to enforce Secure + Path=/ + no Domain, which
+// stops a sibling subdomain from shadowing our cookie with its own value.
+const SESSION_COOKIE: &str = "__Host-v_session";
+const REG_COOKIE: &str = "__Host-v_reg";
+const AUTH_COOKIE: &str = "__Host-v_auth";
+
 const SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 12);
 const CEREMONY_TTL: Duration = Duration::from_secs(300);
+
+/// Hard ceiling on in-flight ceremonies. `/auth/*/start` is unauthenticated, so
+/// without a cap it is a free memory-exhaustion primitive against the daemon.
+///
+/// When full we evict the oldest entry rather than refusing the request. A cap
+/// that *rejects* trades memory exhaustion for a lockout: `login_start` is the
+/// endpoint the real admin needs, so an attacker holding the map full would
+/// keep them out of their own dashboard. Eviction bounds memory just as well
+/// while leaving a legitimate ceremony — which completes in seconds — a slot.
+///
+/// Per-IP quotas would be better, but not here: vitals is meant to sit on
+/// loopback behind a proxy, so the peer address is always 127.0.0.1, and
+/// trusting `X-Forwarded-For` would let an attacker both bypass the quota and
+/// grow the map with attacker-chosen keys. That needs an explicit
+/// trusted-proxy setting first.
+const MAX_CEREMONIES: usize = 1024;
+/// Hard ceiling on live sessions. Reached only by a real passkey login, so this
+/// is a backstop rather than a defence.
+const MAX_SESSIONS: usize = 1024;
 
 /// Persisted credential store.
 #[derive(Default, Serialize, Deserialize)]
@@ -35,30 +68,68 @@ struct Store {
     passkeys: Vec<Passkey>,
 }
 
+/// What a pending registration ceremony was authorized to do. Recorded at
+/// `start` and re-validated at `finish`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RegMode {
+    /// No admin existed: this ceremony may bootstrap one.
+    Bootstrap,
+    /// An authenticated admin is adding another device.
+    AddDevice,
+}
+
+/// A pending registration: the library's ceremony state, what it was authorized
+/// to do, and when it stops being redeemable.
+type PendingReg = (PasskeyRegistration, RegMode, SystemTime);
+type PendingAuth = (PasskeyAuthentication, SystemTime);
+
 #[derive(Clone)]
 pub struct AuthState {
     webauthn: Arc<Webauthn>,
     store: Arc<Mutex<Store>>,
     path: PathBuf,
-    reg: Arc<Mutex<HashMap<String, (PasskeyRegistration, Instant)>>>,
-    auth: Arc<Mutex<HashMap<String, (PasskeyAuthentication, Instant)>>>,
-    sessions: Arc<Mutex<HashMap<String, Instant>>>,
+    reg: Arc<Mutex<HashMap<String, PendingReg>>>,
+    auth: Arc<Mutex<HashMap<String, PendingAuth>>>,
+    sessions: Arc<Mutex<HashMap<String, SystemTime>>>,
+    /// One-time secret required to claim the admin account. `Some` only while
+    /// no credential is enrolled; cleared the moment one is.
+    bootstrap: Arc<Mutex<Option<String>>>,
 }
 
 impl AuthState {
-    /// Build from config; None if rp_id/rp_origin aren't set (dashboard auth off).
+    /// Build from config. Errors here are fatal to the caller by design — a
+    /// dashboard that silently falls back to "no auth" is worse than one that
+    /// refuses to start.
     pub fn new(rp_id: &str, rp_origin: &str, data_dir: &str) -> anyhow::Result<Self> {
         let origin = Url::parse(rp_origin).context("rp_origin must be a URL")?;
         let webauthn = WebauthnBuilder::new(rp_id, &origin)?
             .rp_name("vitals")
             .build()?;
 
-        std::fs::create_dir_all(data_dir).ok();
+        std::fs::create_dir_all(data_dir)
+            .with_context(|| format!("creating data_dir {data_dir}"))?;
         let path = PathBuf::from(data_dir).join("auth.json");
         let store = if path.exists() {
-            serde_json::from_str(&std::fs::read_to_string(&path)?)?
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            serde_json::from_str(&raw).with_context(|| {
+                format!(
+                    "parsing {} — refusing to start with unreadable credentials; \
+                     move the file aside to re-bootstrap",
+                    path.display()
+                )
+            })?
         } else {
             Store::default()
+        };
+
+        // Without this, enrolment is trust-on-first-use: whoever reaches the
+        // URL between deploy and setup claims the account. Requiring a secret
+        // that only appears in the server's log closes that window.
+        let bootstrap = if store.passkeys.is_empty() {
+            Some(hex32())
+        } else {
+            None
         };
 
         Ok(Self {
@@ -68,29 +139,47 @@ impl AuthState {
             reg: Arc::new(Mutex::new(HashMap::new())),
             auth: Arc::new(Mutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            bootstrap: Arc::new(Mutex::new(bootstrap)),
         })
     }
 
-    fn persist(&self) {
-        if let Ok(s) = self.store.lock() {
-            if let Ok(json) = serde_json::to_string_pretty(&*s) {
-                let _ = std::fs::write(&self.path, json);
-            }
+    /// Write `auth.json` atomically: temp file in the same directory, fsync,
+    /// rename. A crash mid-write must never leave a truncated file, because a
+    /// truncated file is an unparseable one and that blocks startup.
+    fn persist(&self) -> anyhow::Result<()> {
+        let json = {
+            let s = self.store.lock().map_err(|_| anyhow::anyhow!("store lock poisoned"))?;
+            serde_json::to_string_pretty(&*s)?
+        };
+
+        let tmp = self.path.with_extension("json.tmp");
+        {
+            let mut f = open_private(&tmp)
+                .with_context(|| format!("creating {}", tmp.display()))?;
+            f.write_all(json.as_bytes())?;
+            f.sync_all()?;
         }
+        std::fs::rename(&tmp, &self.path)
+            .with_context(|| format!("replacing {}", self.path.display()))?;
+        Ok(())
     }
 
+    /// Is an admin enrolled? Fails **closed**: if we can't tell, assume yes, so
+    /// a lock failure can never re-open the bootstrap path.
     fn registered(&self) -> bool {
-        self.store.lock().map(|s| !s.passkeys.is_empty()).unwrap_or(false)
+        self.store.lock().map_or(true, |s| !s.passkeys.is_empty())
     }
 
-    /// Is the request carrying a valid session cookie?
+    /// Is the request carrying a valid session cookie? This is the single
+    /// session check — the API middleware builds a `CookieJar` and calls it too,
+    /// so both surfaces agree on how a cookie header is parsed.
     pub fn session_valid(&self, jar: &CookieJar) -> bool {
         let Some(tok) = jar.get(SESSION_COOKIE).map(|c| c.value().to_string()) else {
             return false;
         };
         let mut s = self.sessions.lock().unwrap();
         match s.get(&tok) {
-            Some(exp) if *exp > Instant::now() => true,
+            Some(exp) if *exp > SystemTime::now() => true,
             Some(_) => {
                 s.remove(&tok);
                 false
@@ -99,42 +188,61 @@ impl AuthState {
         }
     }
 
-    /// Same check from the /api middleware, which has the raw Cookie header.
-    pub fn session_valid_in(&self, cookie_header: Option<&str>) -> bool {
-        let Some(h) = cookie_header else { return false };
-        let Some(tok) = h
-            .split(';')
-            .filter_map(|kv| kv.trim().split_once('='))
-            .find(|(k, _)| *k == SESSION_COOKIE)
-            .map(|(_, v)| v.to_string())
-        else {
-            return false;
-        };
-        let s = self.sessions.lock().unwrap();
-        matches!(s.get(&tok), Some(exp) if *exp > Instant::now())
-    }
-
     fn new_session(&self) -> Cookie<'static> {
         let token = hex32();
-        self.sessions
-            .lock()
-            .unwrap()
-            .insert(token.clone(), Instant::now() + SESSION_TTL);
-        session_cookie(token, SESSION_TTL)
+        let mut s = self.sessions.lock().unwrap();
+        s.retain(|_, exp| *exp > SystemTime::now());
+        if s.len() >= MAX_SESSIONS {
+            // Drop the soonest-to-expire rather than refuse a legitimate login.
+            if let Some(oldest) = s.iter().min_by_key(|(_, e)| **e).map(|(k, _)| k.clone()) {
+                s.remove(&oldest);
+            }
+        }
+        s.insert(token.clone(), SystemTime::now() + SESSION_TTL);
+        drop(s);
+        build_cookie(SESSION_COOKIE, token)
     }
+
+    /// The enrolment secret, if the account is still unclaimed.
+    pub fn bootstrap_token(&self) -> Option<String> {
+        self.bootstrap.lock().ok().and_then(|t| t.clone())
+    }
+
+    /// Drop everything expired. Called on a timer from `main`, so state can't
+    /// accumulate on a process that is never signed into again.
+    pub fn sweep(&self) {
+        let now = SystemTime::now();
+        if let Ok(mut m) = self.reg.lock() {
+            m.retain(|_, (_, _, exp)| *exp > now);
+        }
+        if let Ok(mut m) = self.auth.lock() {
+            m.retain(|_, (_, exp)| *exp > now);
+        }
+        if let Ok(mut m) = self.sessions.lock() {
+            m.retain(|_, exp| *exp > now);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn open_private(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_private(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::create(path)
 }
 
 fn hex32() -> String {
     let bytes: [u8; 32] = rand::random();
     bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn session_cookie(value: String, _ttl: Duration) -> Cookie<'static> {
-    build_cookie(SESSION_COOKIE, value)
-}
-
-fn scratch_cookie(name: &'static str, value: String) -> Cookie<'static> {
-    build_cookie(name, value)
 }
 
 // Session cookies (no explicit Max-Age); the server enforces the real TTL.
@@ -145,6 +253,48 @@ fn build_cookie(name: &'static str, value: String) -> Cookie<'static> {
         .secure(true)
         .same_site(SameSite::Lax)
         .build()
+}
+
+/// A removal cookie has to satisfy the same constraints as the cookie it
+/// clears, or the browser rejects the deletion and the original survives.
+///
+/// Two separate traps here, both verified against a real browser:
+/// * the `Path` must match, or the deletion is scoped to the request path;
+/// * a `__Host-`-prefixed name requires `Secure` (and `Path=/`, no `Domain`)
+///   on *every* `Set-Cookie` bearing it, including the one with `Max-Age=0`
+///   — RFC 6265bis §4.1.3. Without `Secure` the browser silently drops it.
+fn clear_cookie(name: &'static str) -> Cookie<'static> {
+    Cookie::build((name, ""))
+        .path("/")
+        .secure(true)
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .build()
+}
+
+/// Insert a ceremony, evicting the oldest if the map is full. Expired entries
+/// go first, so a burst of abandoned ceremonies costs nothing once it ages out.
+fn insert_capped<V>(
+    map: &Mutex<HashMap<String, V>>,
+    key: String,
+    val: V,
+    exp_of: impl Fn(&V) -> SystemTime,
+) {
+    let mut m = map.lock().unwrap();
+    let now = SystemTime::now();
+    m.retain(|_, v| exp_of(v) > now);
+    while m.len() >= MAX_CEREMONIES {
+        // Oldest = soonest to expire, since every entry gets the same TTL.
+        let Some(oldest) = m
+            .iter()
+            .min_by_key(|(_, v)| exp_of(v))
+            .map(|(k, _)| k.clone())
+        else {
+            break;
+        };
+        m.remove(&oldest);
+    }
+    m.insert(key, val);
 }
 
 // ---------------------------------------------------------------- handlers --
@@ -173,14 +323,43 @@ pub async fn status(state: State<crate::web::AppState>, jar: CookieJar) -> Json<
     Json(AuthStatus { registered, signed_in })
 }
 
+/// Body of `/auth/register/start`. Only the bootstrap flow needs a field, and
+/// an absent body is fine for the add-device flow.
+#[derive(Deserialize, Default)]
+pub struct RegisterStart {
+    #[serde(default)]
+    token: Option<String>,
+}
+
 pub async fn register_start(
     state: State<crate::web::AppState>,
     jar: CookieJar,
+    body: Option<Json<RegisterStart>>,
 ) -> Result<(CookieJar, Json<CreationChallengeResponse>), (StatusCode, String)> {
     let a = state.auth.as_ref().ok_or((StatusCode::NOT_FOUND, "auth off".into()))?;
+
     // Bootstrap allowed only when empty, or when already signed in (add a device).
-    if a.registered() && !a.session_valid(&jar) {
-        return Err((StatusCode::FORBIDDEN, "an admin already exists — sign in".into()));
+    let signed_in = a.session_valid(&jar);
+    let mode = match (a.registered(), signed_in) {
+        (false, _) => RegMode::Bootstrap,
+        (true, true) => RegMode::AddDevice,
+        (true, false) => {
+            return Err((StatusCode::FORBIDDEN, "an admin already exists — sign in".into()))
+        }
+    };
+
+    if mode == RegMode::Bootstrap {
+        let expected = a.bootstrap_token().ok_or((
+            StatusCode::FORBIDDEN,
+            "enrolment is closed".to_string(),
+        ))?;
+        let given = body.and_then(|Json(b)| b.token).unwrap_or_default();
+        if !crate::web::ct_eq(given.trim().as_bytes(), expected.as_bytes()) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "enrolment code required — it is printed in the server log at startup".into(),
+            ));
+        }
     }
 
     let (user_id, exclude) = {
@@ -199,8 +378,13 @@ pub async fn register_start(
     a.store.lock().unwrap().user_id.get_or_insert(user_id);
 
     let rid = hex32();
-    a.reg.lock().unwrap().insert(rid.clone(), (reg_state, Instant::now() + CEREMONY_TTL));
-    Ok((jar.add(scratch_cookie(REG_COOKIE, rid)), Json(ccr)))
+    insert_capped(
+        &a.reg,
+        rid.clone(),
+        (reg_state, mode, SystemTime::now() + CEREMONY_TTL),
+        |(_, _, e)| *e,
+    );
+    Ok((jar.add(build_cookie(REG_COOKIE, rid)), Json(ccr)))
 }
 
 pub async fn register_finish(
@@ -209,10 +393,21 @@ pub async fn register_finish(
     Json(cred): Json<RegisterPublicKeyCredential>,
 ) -> Result<(CookieJar, StatusCode), (StatusCode, String)> {
     let a = state.auth.as_ref().ok_or((StatusCode::NOT_FOUND, "auth off".into()))?;
-    let rid = jar.get(REG_COOKIE).map(|c| c.value().to_string())
+    let rid = jar
+        .get(REG_COOKIE)
+        .map(|c| c.value().to_string())
         .ok_or((StatusCode::BAD_REQUEST, "no ceremony".into()))?;
-    let reg_state = a.reg.lock().unwrap().remove(&rid).map(|(s, _)| s)
-        .ok_or((StatusCode::BAD_REQUEST, "ceremony expired".into()))?;
+
+    let (reg_state, mode) = {
+        let mut m = a.reg.lock().unwrap();
+        let (st, mode, exp) = m
+            .remove(&rid)
+            .ok_or((StatusCode::BAD_REQUEST, "ceremony expired".into()))?;
+        if exp <= SystemTime::now() {
+            return Err((StatusCode::BAD_REQUEST, "ceremony expired".into()));
+        }
+        (st, mode)
+    };
 
     let passkey = a
         .webauthn
@@ -221,12 +416,52 @@ pub async fn register_finish(
 
     {
         let mut s = a.store.lock().unwrap();
+
+        // Re-check authorization *now*, under the same lock as the mutation. A
+        // ceremony started before any admin existed must not be redeemable once
+        // one does — otherwise it silently enrols a second admin.
+        let bootstrapping = s.passkeys.is_empty();
+        let allowed = match mode {
+            RegMode::Bootstrap => bootstrapping,
+            RegMode::AddDevice => a.session_valid(&jar),
+        };
+        if !allowed {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "an admin already exists — sign in".into(),
+            ));
+        }
+
+        // webauthn-rs requires the caller to assert the credential is new.
+        if s.passkeys.iter().any(|p| p.cred_id() == passkey.cred_id()) {
+            return Err((StatusCode::BAD_REQUEST, "credential already enrolled".into()));
+        }
+
         s.passkeys.push(passkey);
     }
-    a.persist();
+
+    // Only report success if the credential is durably on disk. Handing back a
+    // session for a passkey that was never written means the next restart
+    // re-opens the unauthenticated bootstrap path.
+    if let Err(e) = a.persist() {
+        a.store.lock().unwrap().passkeys.pop();
+        tracing::error!("persisting credential failed: {e:#}");
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not save credential — check the data directory is writable".into(),
+        ));
+    }
+
+    // A bootstrap just completed: drop every other pending registration so a
+    // ceremony parked during the open window can't be redeemed afterwards.
+    if mode == RegMode::Bootstrap {
+        a.reg.lock().unwrap().clear();
+        // Single use: the account is claimed.
+        *a.bootstrap.lock().unwrap() = None;
+    }
 
     let session = a.new_session();
-    let jar = jar.remove(Cookie::from(REG_COOKIE)).add(session);
+    let jar = jar.remove(clear_cookie(REG_COOKIE)).add(session);
     Ok((jar, StatusCode::OK))
 }
 
@@ -245,8 +480,13 @@ pub async fn login_start(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let aid = hex32();
-    a.auth.lock().unwrap().insert(aid.clone(), (auth_state, Instant::now() + CEREMONY_TTL));
-    Ok((jar.add(scratch_cookie(AUTH_COOKIE, aid)), Json(rcr)))
+    insert_capped(
+        &a.auth,
+        aid.clone(),
+        (auth_state, SystemTime::now() + CEREMONY_TTL),
+        |(_, e)| *e,
+    );
+    Ok((jar.add(build_cookie(AUTH_COOKIE, aid)), Json(rcr)))
 }
 
 pub async fn login_finish(
@@ -255,10 +495,21 @@ pub async fn login_finish(
     Json(cred): Json<PublicKeyCredential>,
 ) -> Result<(CookieJar, StatusCode), (StatusCode, String)> {
     let a = state.auth.as_ref().ok_or((StatusCode::NOT_FOUND, "auth off".into()))?;
-    let aid = jar.get(AUTH_COOKIE).map(|c| c.value().to_string())
+    let aid = jar
+        .get(AUTH_COOKIE)
+        .map(|c| c.value().to_string())
         .ok_or((StatusCode::BAD_REQUEST, "no ceremony".into()))?;
-    let auth_state = a.auth.lock().unwrap().remove(&aid).map(|(s, _)| s)
-        .ok_or((StatusCode::BAD_REQUEST, "ceremony expired".into()))?;
+
+    let auth_state = {
+        let mut m = a.auth.lock().unwrap();
+        let (st, exp) = m
+            .remove(&aid)
+            .ok_or((StatusCode::BAD_REQUEST, "ceremony expired".into()))?;
+        if exp <= SystemTime::now() {
+            return Err((StatusCode::BAD_REQUEST, "ceremony expired".into()));
+        }
+        st
+    };
 
     let result = a
         .webauthn
@@ -271,21 +522,452 @@ pub async fn login_finish(
             pk.update_credential(&result);
         }
     }
-    a.persist();
+    // The signature counter advanced; losing that write weakens cloned-token
+    // detection but must not block a legitimate sign-in.
+    if let Err(e) = a.persist() {
+        tracing::error!("persisting counter update failed: {e:#}");
+    }
 
     let session = a.new_session();
-    let jar = jar.remove(Cookie::from(AUTH_COOKIE)).add(session);
+    let jar = jar.remove(clear_cookie(AUTH_COOKIE)).add(session);
     Ok((jar, StatusCode::OK))
 }
 
+/// POST, not GET: a state-changing endpoint reachable by navigation is
+/// CSRF-able (an `<img>` tag is enough to sign someone out).
 pub async fn logout(state: State<crate::web::AppState>, jar: CookieJar) -> impl IntoResponse {
-    if let (Some(a), Some(tok)) = (&state.auth, jar.get(SESSION_COOKIE).map(|c| c.value().to_string())) {
+    if let (Some(a), Some(tok)) = (
+        &state.auth,
+        jar.get(SESSION_COOKIE).map(|c| c.value().to_string()),
+    ) {
         a.sessions.lock().unwrap().remove(&tok);
     }
-    (jar.remove(Cookie::from(SESSION_COOKIE)), Redirect::to("/"))
+    (jar.remove(clear_cookie(SESSION_COOKIE)), Redirect::to("/"))
 }
 
 // ------------------------------------------------------------------ pages --
 
 const DASHBOARD_HTML: &str = include_str!("web/dashboard.html");
 const LOGIN_HTML: &str = include_str!("web/login.html");
+
+// ------------------------------------------------------------------ tests --
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{header::COOKIE, HeaderMap};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use webauthn_authenticator_rs::softpasskey::SoftPasskey;
+    use webauthn_authenticator_rs::WebauthnAuthenticator;
+
+    const RP_ID: &str = "localhost";
+    const ORIGIN: &str = "https://localhost";
+
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+
+    type Soft = WebauthnAuthenticator<SoftPasskey>;
+    type Err = (StatusCode, String);
+
+    fn soft() -> Soft {
+        WebauthnAuthenticator::new(SoftPasskey::new(true))
+    }
+
+    /// A fresh AppState with passkey auth on and a scratch data dir.
+    fn ctx() -> (crate::web::AppState, PathBuf) {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("vitals-auth-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let auth = AuthState::new(RP_ID, ORIGIN, dir.to_str().unwrap()).unwrap();
+        let store =
+            Arc::new(crate::store::Store::open(dir.join("t.db").to_str().unwrap()).unwrap());
+        let state = crate::web::AppState {
+            snapshot: Arc::new(tokio::sync::RwLock::new(None)),
+            token: None,
+            auth: Some(auth),
+            store,
+        };
+        (state, dir)
+    }
+
+    fn a_of(s: &crate::web::AppState) -> &AuthState {
+        s.auth.as_ref().unwrap()
+    }
+
+    fn jar(pairs: &[(&str, &str)]) -> CookieJar {
+        let mut h = HeaderMap::new();
+        if !pairs.is_empty() {
+            let v = pairs
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            h.insert(COOKIE, v.parse().unwrap());
+        }
+        CookieJar::from_headers(&h)
+    }
+
+    fn cookie_of(j: &CookieJar, name: &str) -> String {
+        j.get(name).expect("cookie should be set").value().to_string()
+    }
+
+    fn passkey_count(s: &crate::web::AppState) -> usize {
+        a_of(s).store.lock().unwrap().passkeys.len()
+    }
+
+    /// Begin a registration; returns the ceremony cookie and the signed credential.
+    async fn reg_start(
+        s: &crate::web::AppState,
+        k: &mut Soft,
+        session: Option<&str>,
+    ) -> Result<(String, RegisterPublicKeyCredential), Err> {
+        let in_jar = match session {
+            Some(t) => jar(&[(SESSION_COOKIE, t)]),
+            None => jar(&[]),
+        };
+        let body = a_of(s)
+            .bootstrap_token()
+            .map(|token| Json(RegisterStart { token: Some(token) }));
+        let (out, Json(ccr)) = register_start(State(s.clone()), in_jar, body).await?;
+        let rid = cookie_of(&out, REG_COOKIE);
+        let cred = k.do_registration(Url::parse(ORIGIN).unwrap(), ccr).unwrap();
+        Ok((rid, cred))
+    }
+
+    async fn reg_finish(
+        s: &crate::web::AppState,
+        rid: &str,
+        cred: RegisterPublicKeyCredential,
+        session: Option<&str>,
+    ) -> Result<String, Err> {
+        let mut pairs = vec![(REG_COOKIE, rid)];
+        if let Some(t) = session {
+            pairs.push((SESSION_COOKIE, t));
+        }
+        let (out, _) = register_finish(State(s.clone()), jar(&pairs), Json(cred)).await?;
+        Ok(cookie_of(&out, SESSION_COOKIE))
+    }
+
+    /// Full enrolment; returns the session token.
+    async fn enroll(
+        s: &crate::web::AppState,
+        k: &mut Soft,
+        session: Option<&str>,
+    ) -> Result<String, Err> {
+        let (rid, cred) = reg_start(s, k, session).await?;
+        reg_finish(s, &rid, cred, session).await
+    }
+
+    async fn login(s: &crate::web::AppState, k: &mut Soft) -> Result<String, Err> {
+        let (out, Json(rcr)) = login_start(State(s.clone()), jar(&[])).await?;
+        let aid = cookie_of(&out, AUTH_COOKIE);
+        let cred = k.do_authentication(Url::parse(ORIGIN).unwrap(), rcr).unwrap();
+        let (out2, _) =
+            login_finish(State(s.clone()), jar(&[(AUTH_COOKIE, &aid)]), Json(cred)).await?;
+        Ok(cookie_of(&out2, SESSION_COOKIE))
+    }
+
+    fn expire_all_ceremonies(a: &AuthState) {
+        let past = SystemTime::now() - Duration::from_secs(1);
+        for v in a.reg.lock().unwrap().values_mut() {
+            v.2 = past;
+        }
+        for v in a.auth.lock().unwrap().values_mut() {
+            v.1 = past;
+        }
+    }
+
+    // ---------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn bootstrap_enrols_and_issues_a_working_session() {
+        let (s, _d) = ctx();
+        let token = enroll(&s, &mut soft(), None).await.expect("bootstrap");
+        assert_eq!(passkey_count(&s), 1);
+        assert!(a_of(&s).session_valid(&jar(&[(SESSION_COOKIE, &token)])));
+        // and it really landed on disk
+        let raw = std::fs::read_to_string(&a_of(&s).path).unwrap();
+        assert!(raw.contains("passkeys"));
+    }
+
+    #[tokio::test]
+    async fn second_bootstrap_is_refused_once_an_admin_exists() {
+        let (s, _d) = ctx();
+        enroll(&s, &mut soft(), None).await.unwrap();
+        let err = reg_start(&s, &mut soft(), None).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(passkey_count(&s), 1);
+    }
+
+    /// The regression this whole change set exists for: a ceremony *started*
+    /// during the pre-bootstrap window must not be redeemable after an admin
+    /// enrols. Starting early used to be enough to become a second admin.
+    #[tokio::test]
+    async fn banked_pre_bootstrap_ceremony_cannot_enrol_after_admin_exists() {
+        let (s, _d) = ctx();
+
+        // Attacker starts (and signs) a ceremony while nobody is enrolled.
+        let mut attacker = soft();
+        let (evil_rid, evil_cred) = reg_start(&s, &mut attacker, None).await.unwrap();
+
+        // Admin bootstraps normally.
+        enroll(&s, &mut soft(), None).await.unwrap();
+        assert_eq!(passkey_count(&s), 1);
+
+        // Attacker redeems the banked ceremony.
+        let res = reg_finish(&s, &evil_rid, evil_cred, None).await;
+        assert!(res.is_err(), "banked ceremony was redeemed: {res:?}");
+        assert_eq!(passkey_count(&s), 1, "attacker enrolled a second passkey");
+    }
+
+    /// The add-device branch must re-check the session at finish, not just at
+    /// start — otherwise a ceremony begun while signed in stays redeemable
+    /// after sign-out.
+    #[tokio::test]
+    async fn add_device_ceremony_is_refused_once_the_session_is_gone() {
+        let (s, _d) = ctx();
+        let token = enroll(&s, &mut soft(), None).await.unwrap();
+
+        let mut second = soft();
+        let (rid, cred) = reg_start(&s, &mut second, Some(&token)).await.unwrap();
+
+        // Sign out between start and finish.
+        a_of(&s).sessions.lock().unwrap().remove(&token);
+
+        let err = reg_finish(&s, &rid, cred, Some(&token)).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(passkey_count(&s), 1);
+    }
+
+    #[tokio::test]
+    async fn add_device_works_while_signed_in() {
+        let (s, _d) = ctx();
+        let token = enroll(&s, &mut soft(), None).await.unwrap();
+        enroll(&s, &mut soft(), Some(&token)).await.expect("add device");
+        assert_eq!(passkey_count(&s), 2);
+    }
+
+    #[tokio::test]
+    async fn expired_registration_ceremony_is_refused() {
+        let (s, _d) = ctx();
+        let (rid, cred) = reg_start(&s, &mut soft(), None).await.unwrap();
+        expire_all_ceremonies(a_of(&s));
+        let err = reg_finish(&s, &rid, cred, None).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(passkey_count(&s), 0);
+    }
+
+    #[tokio::test]
+    async fn login_round_trip_issues_a_session() {
+        let (s, _d) = ctx();
+        let mut key = soft();
+        let first = enroll(&s, &mut key, None).await.unwrap();
+
+        let second = login(&s, &mut key).await.expect("login");
+        assert_ne!(first, second, "a fresh session token per ceremony");
+        assert!(a_of(&s).session_valid(&jar(&[(SESSION_COOKIE, &second)])));
+    }
+
+    #[tokio::test]
+    async fn expired_authentication_ceremony_is_refused() {
+        let (s, _d) = ctx();
+        let mut key = soft();
+        enroll(&s, &mut key, None).await.unwrap();
+
+        let (out, Json(rcr)) = login_start(State(s.clone()), jar(&[])).await.unwrap();
+        let aid = cookie_of(&out, AUTH_COOKIE);
+        let cred = key.do_authentication(Url::parse(ORIGIN).unwrap(), rcr).unwrap();
+        expire_all_ceremonies(a_of(&s));
+
+        let err = login_finish(State(s.clone()), jar(&[(AUTH_COOKIE, &aid)]), Json(cred))
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    /// A ceremony is single-use: the state is removed before verification, so a
+    /// captured assertion cannot be replayed.
+    #[tokio::test]
+    async fn authentication_ceremony_cannot_be_replayed() {
+        let (s, _d) = ctx();
+        let mut key = soft();
+        enroll(&s, &mut key, None).await.unwrap();
+
+        let (out, Json(rcr)) = login_start(State(s.clone()), jar(&[])).await.unwrap();
+        let aid = cookie_of(&out, AUTH_COOKIE);
+        let cred = key.do_authentication(Url::parse(ORIGIN).unwrap(), rcr).unwrap();
+
+        let first =
+            login_finish(State(s.clone()), jar(&[(AUTH_COOKIE, &aid)]), Json(cred.clone())).await;
+        assert!(first.is_ok());
+
+        let replay = login_finish(State(s.clone()), jar(&[(AUTH_COOKIE, &aid)]), Json(cred)).await;
+        assert!(replay.is_err(), "assertion was accepted twice");
+    }
+
+    #[tokio::test]
+    async fn login_is_refused_before_any_enrolment() {
+        let (s, _d) = ctx();
+        let err = login_start(State(s.clone()), jar(&[])).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    /// A credential that cannot be stored must not yield a session — otherwise
+    /// the next restart finds an empty store and re-opens bootstrap.
+    #[tokio::test]
+    async fn failed_persist_rolls_back_and_refuses_the_session() {
+        let (mut s, _d) = ctx();
+        {
+            // Point persistence somewhere unwritable. (Running as root, so a
+            // read-only directory would not be enough.)
+            let a = s.auth.as_mut().unwrap();
+            a.path = PathBuf::from("/nonexistent-dir-for-vitals-test/auth.json");
+        }
+        let (rid, cred) = reg_start(&s, &mut soft(), None).await.unwrap();
+        let err = reg_finish(&s, &rid, cred, None).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(passkey_count(&s), 0, "credential should have been rolled back");
+    }
+
+    #[tokio::test]
+    async fn bootstrap_requires_the_one_time_code() {
+        let (s, _d) = ctx();
+        assert!(a_of(&s).bootstrap_token().is_some());
+
+        // No code at all.
+        let err = register_start(State(s.clone()), jar(&[]), None).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+
+        // Wrong code.
+        let err = register_start(
+            State(s.clone()),
+            jar(&[]),
+            Some(Json(RegisterStart { token: Some("nope".into()) })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(passkey_count(&s), 0);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_code_is_single_use() {
+        let (s, _d) = ctx();
+        let code = a_of(&s).bootstrap_token().unwrap();
+        enroll(&s, &mut soft(), None).await.unwrap();
+
+        // Burned on success, so a leaked log line can't be replayed later.
+        assert!(a_of(&s).bootstrap_token().is_none());
+
+        // And the store no longer offers bootstrap at all.
+        a_of(&s).store.lock().unwrap().passkeys.clear();
+        let err = register_start(
+            State(s.clone()),
+            jar(&[]),
+            Some(Json(RegisterStart { token: Some(code) })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn adding_a_device_needs_no_code() {
+        let (s, _d) = ctx();
+        let token = enroll(&s, &mut soft(), None).await.unwrap();
+        assert!(a_of(&s).bootstrap_token().is_none());
+        // enroll() therefore sends no token here, and it must still work.
+        enroll(&s, &mut soft(), Some(&token)).await.expect("add device");
+        assert_eq!(passkey_count(&s), 2);
+    }
+
+    /// A full ceremony map must not lock the real admin out: `login_start` is
+    /// exactly what they need, so we evict rather than refuse.
+    #[tokio::test]
+    async fn a_flooded_ceremony_map_does_not_lock_out_a_real_login() {
+        let (s, _d) = ctx();
+        let mut key = soft();
+        enroll(&s, &mut key, None).await.unwrap();
+
+        for _ in 0..(MAX_CEREMONIES + 50) {
+            let _ = login_start(State(s.clone()), jar(&[])).await.expect("never refuses");
+        }
+        assert!(a_of(&s).auth.lock().unwrap().len() <= MAX_CEREMONIES);
+
+        // The admin can still sign in.
+        login(&s, &mut key).await.expect("login after flood");
+    }
+
+    #[tokio::test]
+    async fn ceremony_map_is_capped_against_unauthenticated_growth() {
+        let (s, _d) = ctx();
+        enroll(&s, &mut soft(), None).await.unwrap();
+        for _ in 0..(MAX_CEREMONIES * 2) {
+            let _ = login_start(State(s.clone()), jar(&[])).await.unwrap();
+        }
+        assert!(
+            a_of(&s).auth.lock().unwrap().len() <= MAX_CEREMONIES,
+            "unauthenticated requests grew the map past the cap"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_drops_expired_state() {
+        let (s, _d) = ctx();
+        let token = enroll(&s, &mut soft(), None).await.unwrap();
+        let _ = login_start(State(s.clone()), jar(&[])).await.unwrap();
+
+        let a = a_of(&s);
+        assert_eq!(a.auth.lock().unwrap().len(), 1);
+        expire_all_ceremonies(a);
+        a.sessions
+            .lock()
+            .unwrap()
+            .insert(token.clone(), SystemTime::now() - Duration::from_secs(1));
+
+        a.sweep();
+        assert!(a.auth.lock().unwrap().is_empty());
+        assert!(!a.session_valid(&jar(&[(SESSION_COOKIE, &token)])));
+    }
+
+    #[tokio::test]
+    async fn unknown_or_absent_session_cookies_are_invalid() {
+        let (s, _d) = ctx();
+        enroll(&s, &mut soft(), None).await.unwrap();
+        let a = a_of(&s);
+        assert!(!a.session_valid(&jar(&[])));
+        assert!(!a.session_valid(&jar(&[(SESSION_COOKIE, "deadbeef")])));
+    }
+
+    #[tokio::test]
+    async fn registered_fails_closed_and_reflects_state() {
+        let (s, _d) = ctx();
+        assert!(!a_of(&s).registered());
+        enroll(&s, &mut soft(), None).await.unwrap();
+        assert!(a_of(&s).registered());
+    }
+
+    /// Credentials must survive a restart — the path that, when broken, silently
+    /// re-opens the bootstrap window.
+    #[tokio::test]
+    async fn enrolment_survives_a_reload_from_disk() {
+        let (s, dir) = ctx();
+        enroll(&s, &mut soft(), None).await.unwrap();
+
+        let reloaded = AuthState::new(RP_ID, ORIGIN, dir.to_str().unwrap()).unwrap();
+        assert!(reloaded.registered());
+        assert_eq!(reloaded.store.lock().unwrap().passkeys.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn corrupt_credential_file_is_an_error_not_an_empty_store() {
+        let (s, dir) = ctx();
+        enroll(&s, &mut soft(), None).await.unwrap();
+        std::fs::write(dir.join("auth.json"), "{\"user_id\":").unwrap();
+
+        // Must fail loudly: silently returning an empty store would drop the
+        // dashboard to unauthenticated on the next start.
+        assert!(AuthState::new(RP_ID, ORIGIN, dir.to_str().unwrap()).is_err());
+    }
+}
