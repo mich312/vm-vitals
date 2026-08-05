@@ -7,7 +7,10 @@ const check = (name, pass, detail='') => { results.push({name, pass, detail});
   console.log(`${pass?'PASS':'FAIL'}  ${name}${detail?'  — '+detail:''}`); };
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  // Use Playwright's own resolution by default so this works on CI; the env
+  // override is for sandboxes that ship a browser at a fixed path.
+  const exe = process.env.CHROMIUM_PATH;
+  const browser = await chromium.launch(exe ? { executablePath: exe } : {});
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
 

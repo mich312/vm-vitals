@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Builds must use the committed lockfile: resolving fresh would silently pull
+  # new dependency versions into a security-relevant binary with no diff.
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  test:
+    name: build · test · clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --locked --all-targets
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+  msrv:
+    name: msrv (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Keeps `rust-version` honest. It previously claimed 1.82, which had never
+      # been buildable: webauthn-rs 0.5 and the edition2024 crates in its tree
+      # require 1.88.
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  e2e:
+    name: browser e2e (passkey)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build release binary
+        run: cargo build --locked --release
+
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      # Drives a real Chromium with a CDP virtual authenticator against a real
+      # TLS front-end. Covers what the Rust tests structurally cannot: __Host-
+      # cookie acceptance, whether the CSP blocks our own inline scripts, POST
+      # logout, and the single-instance poll loop.
+      - name: Run browser e2e
+        run: NODE_PATH="$PWD/node_modules" ./tests/e2e/run.sh
