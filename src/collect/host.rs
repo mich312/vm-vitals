@@ -1,7 +1,7 @@
 //! Host metrics via `sysinfo`: CPU, memory, swap, disk (`/`), load, uptime.
 
 use serde::Serialize;
-use sysinfo::{Disks, System};
+use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HostMetrics {
@@ -21,41 +21,61 @@ pub struct HostMetrics {
 }
 
 /// Keeps a `System` between ticks so CPU usage is measured over the interval.
+///
+/// Deliberately **not** `System::new_all()`: that refreshes every process —
+/// including `cmd`, `exe`, `environ` and `user` for each — none of which this
+/// collector reads. It costs ~60ms, ~2MB of permanently retained process table,
+/// and one open fd per process (sysinfo holds `/proc/<pid>/stat` open), and as a
+/// side effect raises the daemon's `RLIMIT_NOFILE` to the hard limit.
 pub struct HostCollector {
     sys: System,
+    disks: Disks,
+    cpu: CpuRefreshKind,
+    mem: MemoryRefreshKind,
 }
 
 impl HostCollector {
     pub fn new() -> Self {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        Self { sys }
+        let cpu = CpuRefreshKind::new().with_cpu_usage();
+        let mem = MemoryRefreshKind::new().with_ram().with_swap();
+        let sys = System::new_with_specifics(
+            RefreshKind::new().with_cpu(cpu).with_memory(mem),
+        );
+        Self {
+            sys,
+            // Held across ticks: rebuilding the list re-parses /proc/mounts and
+            // reallocates every mount-point string on each collection.
+            disks: Disks::new_with_refreshed_list(),
+            cpu,
+            mem,
+        }
     }
 
     pub fn collect(&mut self) -> HostMetrics {
-        self.sys.refresh_cpu_all();
-        self.sys.refresh_memory();
+        self.sys.refresh_cpu_specifics(self.cpu);
+        self.sys.refresh_memory_specifics(self.mem);
 
         let cpu_pct = self.sys.global_cpu_usage();
 
         let mem_total = self.sys.total_memory(); // bytes
         let mem_avail = self.sys.available_memory();
         let mem_used_pct = if mem_total > 0 {
-            ((mem_total - mem_avail) as f32 / mem_total as f32) * 100.0
+            (mem_total.saturating_sub(mem_avail) as f32 / mem_total as f32) * 100.0
         } else {
             0.0
         };
 
         // Disk for `/`.
-        let disks = Disks::new_with_refreshed_list();
-        let root = disks
+        self.disks.refresh();
+        let root = self
+            .disks
             .iter()
             .find(|d| d.mount_point() == std::path::Path::new("/"));
         let (disk_total, disk_avail) = root
             .map(|d| (d.total_space(), d.available_space()))
             .unwrap_or((0, 0));
         let disk_used_pct = if disk_total > 0 {
-            ((disk_total - disk_avail) as f32 / disk_total as f32) * 100.0
+            (disk_total.saturating_sub(disk_avail) as f32 / disk_total as f32) * 100.0
         } else {
             0.0
         };
@@ -64,7 +84,7 @@ impl HostCollector {
 
         HostMetrics {
             hostname: System::host_name().unwrap_or_else(|| "host".to_string()),
-            cpu_pct,
+            cpu_pct: if cpu_pct.is_finite() { cpu_pct } else { 0.0 },
             mem_total_mb: mem_total / 1_000_000,
             mem_avail_mb: mem_avail / 1_000_000,
             mem_used_pct,
@@ -77,5 +97,11 @@ impl HostCollector {
             load15: la.fifteen,
             uptime_secs: System::uptime(),
         }
+    }
+}
+
+impl Default for HostCollector {
+    fn default() -> Self {
+        Self::new()
     }
 }
