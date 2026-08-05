@@ -43,3 +43,10 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# Software authenticator, so the passkey ceremonies can be driven end-to-end in
+# tests. NOTE: this resolves to a version needing rustc 1.88, above the 1.82
+# `rust-version` above. That only affects `cargo test`; `cargo build` of the
+# binary still honours the declared MSRV.
+[dev-dependencies]
+webauthn-authenticator-rs = { version = "0.5", features = ["softpasskey"] }
