@@ -225,10 +225,21 @@ fn build_cookie(name: &'static str, value: String) -> Cookie<'static> {
         .build()
 }
 
-/// A removal cookie must carry the same `Path` as the one it clears, or the
-/// browser scopes the deletion to the request path and the original survives.
+/// A removal cookie has to satisfy the same constraints as the cookie it
+/// clears, or the browser rejects the deletion and the original survives.
+///
+/// Two separate traps here, both verified against a real browser:
+/// * the `Path` must match, or the deletion is scoped to the request path;
+/// * a `__Host-`-prefixed name requires `Secure` (and `Path=/`, no `Domain`)
+///   on *every* `Set-Cookie` bearing it, including the one with `Max-Age=0`
+///   — RFC 6265bis §4.1.3. Without `Secure` the browser silently drops it.
 fn clear_cookie(name: &'static str) -> Cookie<'static> {
-    Cookie::build((name, "")).path("/").build()
+    Cookie::build((name, ""))
+        .path("/")
+        .secure(true)
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .build()
 }
 
 /// Insert a ceremony, refusing once the map is full. Expired entries are
