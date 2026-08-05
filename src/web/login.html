@@ -20,18 +20,26 @@
   button:focus-visible { outline:2px solid #9ec1ff; outline-offset:2px; }
   .err { color:#ff8a7a; min-height:1.2em; margin-top:1rem; font-size:.9em; }
   .note { font-size:.82em; color:#8b93a1; margin-top:1.5rem; line-height:1.45; }
+  input { font:inherit; font-family:ui-monospace,monospace; width:100%;
+          padding:.6rem .7rem; margin-bottom:.7rem; border-radius:.6rem;
+          border:1px solid #3a3f48; background:#15181d; color:inherit; }
+  @media (prefers-color-scheme: light){ input{ background:#fff; border-color:#ccd2da; } }
+  input:focus-visible { outline:2px solid #9ec1ff; outline-offset:1px; }
 </style>
 </head>
 <body>
 <main>
   <h1>vitals</h1>
   <p id="sub">…</p>
+  <input id="code" type="text" inputmode="latin" autocomplete="off"
+         spellcheck="false" placeholder="one-time enrolment code"
+         aria-label="One-time enrolment code" hidden>
   <button id="primary" hidden></button>
   <div class="err" id="err" role="alert"></div>
   <div class="note" id="note" hidden>
-    No admin is enrolled yet, so this page will enrol the first passkey it is
-    given. Complete setup now — until you do, anyone who can reach this URL can
-    claim the account.
+    No admin is enrolled yet. Enrolment requires the one-time code printed in
+    the server log at startup (<code>journalctl -u vitals</code>), so reaching
+    this page is not enough to claim the account.
   </div>
 </main>
 <script>
@@ -55,7 +63,11 @@ async function post(url, body) {
 }
 
 async function register() {
-  const opt = await jget('/auth/register/start', { method:'POST' });
+  const code = document.getElementById('code').value.trim();
+  if (!code) throw new Error('Enter the one-time code from the server log.');
+  const opt = await jget('/auth/register/start', {
+    method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({ token: code }) });
   const pk = opt.publicKey;
   pk.challenge = b64uToBuf(pk.challenge);
   pk.user.id = b64uToBuf(pk.user.id);
@@ -111,6 +123,9 @@ function guard(fn) {
     sub.textContent = 'Set up the admin account.';
     btn.textContent = 'Create account with passkey';
     btn.onclick = guard(register);
+    const code = document.getElementById('code');
+    code.hidden = false;
+    code.focus();
     document.getElementById('note').hidden = false;
   }
   btn.hidden = false;

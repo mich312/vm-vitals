@@ -144,7 +144,7 @@ async fn series(
 
 /// Constant-time byte comparison. Length still differs early — an unavoidable
 /// leak without hashing — but the content comparison does not short-circuit.
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

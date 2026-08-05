@@ -61,6 +61,17 @@ async fn run() -> anyhow::Result<()> {
             let a = auth::AuthState::new(id, origin, &cfg.data_dir)
                 .map_err(|e| anyhow::anyhow!("passkey auth init failed: {e:#}"))?;
             tracing::info!("passkey dashboard auth enabled (rp_id={id})");
+            if let Some(code) = a.bootstrap_token() {
+                // Deliberately loud and deliberately only here: possession of
+                // this is what proves the person enrolling is the operator and
+                // not whoever found the URL first.
+                tracing::warn!(
+                    "\n\n  No admin enrolled yet. To claim the account, open {origin} \
+                     and enter this one-time code:\n\n      {code}\n\n  \
+                     It is shown only in this log, and stops working once a \
+                     passkey is enrolled.\n"
+                );
+            }
             Some(a)
         }
         (None, None) => None,

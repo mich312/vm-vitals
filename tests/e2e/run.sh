@@ -35,4 +35,8 @@ for _ in $(seq 1 20); do
   curl -sk -o /dev/null https://localhost:8443/healthz && break || sleep 1
 done
 
-NODE_PATH=${NODE_PATH:-/opt/node22/lib/node_modules} node e2e.js
+# The operator reads this out of `journalctl -u vitals`; we read the log file.
+CODE=$(grep -oE '^ {6}[0-9a-f]{64}$' "$DIR/vitals.log" | tr -d ' ' | head -1)
+[ -n "$CODE" ] || { echo "no bootstrap code in log"; sed -n '1,40p' "$DIR/vitals.log"; exit 2; }
+
+BOOTSTRAP_CODE="$CODE" NODE_PATH=${NODE_PATH:-/opt/node22/lib/node_modules} node e2e.js

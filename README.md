@@ -87,9 +87,11 @@ docker run -d --name vitals \
 
 Configure authentication before exposing it: set `web.rp_id` + `web.rp_origin`
 for passkey sign-in, or `web.token` for the API. vitals refuses to start if it
-would serve a non-loopback address with neither. Then open the dashboard and
-enroll a passkey — do that immediately, because until the first credential
-exists the sign-in page enrolls whoever reaches it.
+would serve a non-loopback address with neither.
+
+On first start it prints a one-time enrolment code to the log
+(`journalctl -u vitals`). Open the dashboard, enter that code, and enroll your
+passkey — reaching the URL alone is not enough to claim the account.
 
 Host disk metrics are only meaningful in the host-binary deployment; in a
 container `sysinfo` measures the container's own filesystem.

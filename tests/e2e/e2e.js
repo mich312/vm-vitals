@@ -31,6 +31,17 @@ const check = (name, pass, detail='') => { results.push({name, pass, detail});
   const btn = page.locator('#primary');
   await btn.waitFor({ timeout: 10000 });
   check('sign-in page offers bootstrap', (await btn.textContent()).includes('Create account'));
+  check('enrolment code is required up front', await page.locator('#code').isVisible());
+
+  // Wrong code must be refused before any credential is created.
+  await page.locator('#code').fill('0'.repeat(64));
+  await btn.click();
+  await page.waitForTimeout(1500);
+  check('wrong enrolment code is refused',
+        await page.locator('#rows').count() === 0,
+        'err=' + (await page.locator('#err').textContent().catch(()=>'?')));
+  errs.length = 0;   // the 403 above was deliberate
+  await page.locator('#code').fill(process.env.BOOTSTRAP_CODE || '');
   check('no console errors on login page', errs.length===0, errs.join(' | '));
   check('bootstrap warning shown', await page.locator('#note').isVisible());
 

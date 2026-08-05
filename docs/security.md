@@ -69,11 +69,12 @@ files out of any container.
 - **Passkeys need HTTPS.** Credentials are bound to `rp_id`/`rp_origin`, so
   serve the dashboard over TLS at a stable hostname *before* enrolling.
   Changing either value later invalidates every enrolled credential.
-- **Enrol immediately after deploying.** Until the first passkey exists, the
-  sign-in page will enrol whoever reaches it — that is how bootstrap works. The
-  window is the gap between starting the service and completing enrolment, so
-  keep it short, or bring the service up on loopback and enrol through an SSH
-  tunnel before exposing it.
+- **Enrolment requires a one-time code.** On first start, with no credential
+  enrolled, vitals generates a code and prints it to the log
+  (`journalctl -u vitals`). The sign-in page will not enrol a passkey without
+  it, so reaching the URL first is not enough to claim the account. The code is
+  burned on the first successful enrolment and is never written to disk — if
+  you lose it before enrolling, restart the service for a new one.
 - **Sessions** last 12 hours, are held server-side, and are invalidated on sign
   out. Cookies are `__Host-` prefixed, `HttpOnly`, `Secure`, `SameSite=Lax`.
 

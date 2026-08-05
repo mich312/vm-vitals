@@ -44,7 +44,19 @@ const CEREMONY_TTL: Duration = Duration::from_secs(300);
 
 /// Hard ceiling on in-flight ceremonies. `/auth/*/start` is unauthenticated, so
 /// without a cap it is a free memory-exhaustion primitive against the daemon.
-const MAX_CEREMONIES: usize = 64;
+///
+/// When full we evict the oldest entry rather than refusing the request. A cap
+/// that *rejects* trades memory exhaustion for a lockout: `login_start` is the
+/// endpoint the real admin needs, so an attacker holding the map full would
+/// keep them out of their own dashboard. Eviction bounds memory just as well
+/// while leaving a legitimate ceremony — which completes in seconds — a slot.
+///
+/// Per-IP quotas would be better, but not here: vitals is meant to sit on
+/// loopback behind a proxy, so the peer address is always 127.0.0.1, and
+/// trusting `X-Forwarded-For` would let an attacker both bypass the quota and
+/// grow the map with attacker-chosen keys. That needs an explicit
+/// trusted-proxy setting first.
+const MAX_CEREMONIES: usize = 1024;
 /// Hard ceiling on live sessions. Reached only by a real passkey login, so this
 /// is a backstop rather than a defence.
 const MAX_SESSIONS: usize = 1024;
@@ -79,6 +91,9 @@ pub struct AuthState {
     reg: Arc<Mutex<HashMap<String, PendingReg>>>,
     auth: Arc<Mutex<HashMap<String, PendingAuth>>>,
     sessions: Arc<Mutex<HashMap<String, SystemTime>>>,
+    /// One-time secret required to claim the admin account. `Some` only while
+    /// no credential is enrolled; cleared the moment one is.
+    bootstrap: Arc<Mutex<Option<String>>>,
 }
 
 impl AuthState {
@@ -108,6 +123,15 @@ impl AuthState {
             Store::default()
         };
 
+        // Without this, enrolment is trust-on-first-use: whoever reaches the
+        // URL between deploy and setup claims the account. Requiring a secret
+        // that only appears in the server's log closes that window.
+        let bootstrap = if store.passkeys.is_empty() {
+            Some(hex32())
+        } else {
+            None
+        };
+
         Ok(Self {
             webauthn: Arc::new(webauthn),
             store: Arc::new(Mutex::new(store)),
@@ -115,6 +139,7 @@ impl AuthState {
             reg: Arc::new(Mutex::new(HashMap::new())),
             auth: Arc::new(Mutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            bootstrap: Arc::new(Mutex::new(bootstrap)),
         })
     }
 
@@ -176,6 +201,11 @@ impl AuthState {
         s.insert(token.clone(), SystemTime::now() + SESSION_TTL);
         drop(s);
         build_cookie(SESSION_COOKIE, token)
+    }
+
+    /// The enrolment secret, if the account is still unclaimed.
+    pub fn bootstrap_token(&self) -> Option<String> {
+        self.bootstrap.lock().ok().and_then(|t| t.clone())
     }
 
     /// Drop everything expired. Called on a timer from `main`, so state can't
@@ -242,25 +272,29 @@ fn clear_cookie(name: &'static str) -> Cookie<'static> {
         .build()
 }
 
-/// Insert a ceremony, refusing once the map is full. Expired entries are
-/// dropped first so a burst of abandoned ceremonies can't wedge the endpoint.
+/// Insert a ceremony, evicting the oldest if the map is full. Expired entries
+/// go first, so a burst of abandoned ceremonies costs nothing once it ages out.
 fn insert_capped<V>(
     map: &Mutex<HashMap<String, V>>,
     key: String,
     val: V,
     exp_of: impl Fn(&V) -> SystemTime,
-) -> Result<(), (StatusCode, String)> {
+) {
     let mut m = map.lock().unwrap();
     let now = SystemTime::now();
     m.retain(|_, v| exp_of(v) > now);
-    if m.len() >= MAX_CEREMONIES {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "too many ceremonies in flight — try again shortly".into(),
-        ));
+    while m.len() >= MAX_CEREMONIES {
+        // Oldest = soonest to expire, since every entry gets the same TTL.
+        let Some(oldest) = m
+            .iter()
+            .min_by_key(|(_, v)| exp_of(v))
+            .map(|(k, _)| k.clone())
+        else {
+            break;
+        };
+        m.remove(&oldest);
     }
     m.insert(key, val);
-    Ok(())
 }
 
 // ---------------------------------------------------------------- handlers --
@@ -289,9 +323,18 @@ pub async fn status(state: State<crate::web::AppState>, jar: CookieJar) -> Json<
     Json(AuthStatus { registered, signed_in })
 }
 
+/// Body of `/auth/register/start`. Only the bootstrap flow needs a field, and
+/// an absent body is fine for the add-device flow.
+#[derive(Deserialize, Default)]
+pub struct RegisterStart {
+    #[serde(default)]
+    token: Option<String>,
+}
+
 pub async fn register_start(
     state: State<crate::web::AppState>,
     jar: CookieJar,
+    body: Option<Json<RegisterStart>>,
 ) -> Result<(CookieJar, Json<CreationChallengeResponse>), (StatusCode, String)> {
     let a = state.auth.as_ref().ok_or((StatusCode::NOT_FOUND, "auth off".into()))?;
 
@@ -304,6 +347,20 @@ pub async fn register_start(
             return Err((StatusCode::FORBIDDEN, "an admin already exists — sign in".into()))
         }
     };
+
+    if mode == RegMode::Bootstrap {
+        let expected = a.bootstrap_token().ok_or((
+            StatusCode::FORBIDDEN,
+            "enrolment is closed".to_string(),
+        ))?;
+        let given = body.and_then(|Json(b)| b.token).unwrap_or_default();
+        if !crate::web::ct_eq(given.trim().as_bytes(), expected.as_bytes()) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "enrolment code required — it is printed in the server log at startup".into(),
+            ));
+        }
+    }
 
     let (user_id, exclude) = {
         let s = a.store.lock().unwrap();
@@ -326,7 +383,7 @@ pub async fn register_start(
         rid.clone(),
         (reg_state, mode, SystemTime::now() + CEREMONY_TTL),
         |(_, _, e)| *e,
-    )?;
+    );
     Ok((jar.add(build_cookie(REG_COOKIE, rid)), Json(ccr)))
 }
 
@@ -399,6 +456,8 @@ pub async fn register_finish(
     // ceremony parked during the open window can't be redeemed afterwards.
     if mode == RegMode::Bootstrap {
         a.reg.lock().unwrap().clear();
+        // Single use: the account is claimed.
+        *a.bootstrap.lock().unwrap() = None;
     }
 
     let session = a.new_session();
@@ -426,7 +485,7 @@ pub async fn login_start(
         aid.clone(),
         (auth_state, SystemTime::now() + CEREMONY_TTL),
         |(_, e)| *e,
-    )?;
+    );
     Ok((jar.add(build_cookie(AUTH_COOKIE, aid)), Json(rcr)))
 }
 
@@ -567,7 +626,10 @@ mod tests {
             Some(t) => jar(&[(SESSION_COOKIE, t)]),
             None => jar(&[]),
         };
-        let (out, Json(ccr)) = register_start(State(s.clone()), in_jar).await?;
+        let body = a_of(s)
+            .bootstrap_token()
+            .map(|token| Json(RegisterStart { token: Some(token) }));
+        let (out, Json(ccr)) = register_start(State(s.clone()), in_jar, body).await?;
         let rid = cookie_of(&out, REG_COOKIE);
         let cred = k.do_registration(Url::parse(ORIGIN).unwrap(), ccr).unwrap();
         Ok((rid, cred))
@@ -769,15 +831,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bootstrap_requires_the_one_time_code() {
+        let (s, _d) = ctx();
+        assert!(a_of(&s).bootstrap_token().is_some());
+
+        // No code at all.
+        let err = register_start(State(s.clone()), jar(&[]), None).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+
+        // Wrong code.
+        let err = register_start(
+            State(s.clone()),
+            jar(&[]),
+            Some(Json(RegisterStart { token: Some("nope".into()) })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(passkey_count(&s), 0);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_code_is_single_use() {
+        let (s, _d) = ctx();
+        let code = a_of(&s).bootstrap_token().unwrap();
+        enroll(&s, &mut soft(), None).await.unwrap();
+
+        // Burned on success, so a leaked log line can't be replayed later.
+        assert!(a_of(&s).bootstrap_token().is_none());
+
+        // And the store no longer offers bootstrap at all.
+        a_of(&s).store.lock().unwrap().passkeys.clear();
+        let err = register_start(
+            State(s.clone()),
+            jar(&[]),
+            Some(Json(RegisterStart { token: Some(code) })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn adding_a_device_needs_no_code() {
+        let (s, _d) = ctx();
+        let token = enroll(&s, &mut soft(), None).await.unwrap();
+        assert!(a_of(&s).bootstrap_token().is_none());
+        // enroll() therefore sends no token here, and it must still work.
+        enroll(&s, &mut soft(), Some(&token)).await.expect("add device");
+        assert_eq!(passkey_count(&s), 2);
+    }
+
+    /// A full ceremony map must not lock the real admin out: `login_start` is
+    /// exactly what they need, so we evict rather than refuse.
+    #[tokio::test]
+    async fn a_flooded_ceremony_map_does_not_lock_out_a_real_login() {
+        let (s, _d) = ctx();
+        let mut key = soft();
+        enroll(&s, &mut key, None).await.unwrap();
+
+        for _ in 0..(MAX_CEREMONIES + 50) {
+            let _ = login_start(State(s.clone()), jar(&[])).await.expect("never refuses");
+        }
+        assert!(a_of(&s).auth.lock().unwrap().len() <= MAX_CEREMONIES);
+
+        // The admin can still sign in.
+        login(&s, &mut key).await.expect("login after flood");
+    }
+
+    #[tokio::test]
     async fn ceremony_map_is_capped_against_unauthenticated_growth() {
         let (s, _d) = ctx();
         enroll(&s, &mut soft(), None).await.unwrap();
-        for _ in 0..MAX_CEREMONIES {
-            let _ = login_start(State(s.clone()), jar(&[])).await;
+        for _ in 0..(MAX_CEREMONIES * 2) {
+            let _ = login_start(State(s.clone()), jar(&[])).await.unwrap();
         }
-        let err = login_start(State(s.clone()), jar(&[])).await.unwrap_err();
-        assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
-        assert!(a_of(&s).auth.lock().unwrap().len() <= MAX_CEREMONIES);
+        assert!(
+            a_of(&s).auth.lock().unwrap().len() <= MAX_CEREMONIES,
+            "unauthenticated requests grew the map past the cap"
+        );
     }
 
     #[tokio::test]
